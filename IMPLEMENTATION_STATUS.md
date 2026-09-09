@@ -1,6 +1,6 @@
 # VKB Farm Manager implementation status
 
-- Foundation: complete
+- Foundation and D1 schema: complete
 - Expense system: in progress
 - Dashboard and reporting: remaining
 - Plantation and harvest: remaining

@@ -5,6 +5,10 @@ export type Bindings = {
   DEV_AUTH_ENABLED?: string;
 };
 
+export type TestBindings = Bindings & {
+  TEST_MIGRATIONS: import("@cloudflare/vitest-plugin").D1Migration[];
+};
+
 export type Identity = {
   email: string;
   role: "admin" | "editor" | "viewer";
