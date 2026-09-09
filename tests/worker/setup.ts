@@ -17,5 +17,13 @@ afterEach(async () => {
     env.DB.prepare("DELETE FROM expense_categories WHERE id <> ?").bind(
       "category_uncategorized",
     ),
+    env.DB.prepare("DELETE FROM people WHERE id NOT IN (?, ?)").bind(
+      "person_satish",
+      "person_mahesh",
+    ),
+    env.DB.prepare("DELETE FROM farm_areas WHERE id NOT IN (?, ?)").bind(
+      "area_mt",
+      "area_sk",
+    ),
   ]);
 });

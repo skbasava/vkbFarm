@@ -110,7 +110,7 @@ CREATE TABLE harvests (
   import_fingerprint TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CHECK ((source = 'EXCEL' AND harvest_date IS NULL) OR harvest_date IS NOT NULL),
+  CHECK (harvest_date IS NOT NULL OR (source IS NOT NULL AND source = 'EXCEL')),
   CHECK (actual_revenue_paise = calculated_revenue_paise OR length(trim(revenue_override_reason)) > 0)
 );
 
