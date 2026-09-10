@@ -2,7 +2,8 @@
 
 - Foundation and D1 schema: complete
 - Shared API, formatting, and Access-aware security foundations: complete
-- Expense system: in progress
+- Expense, category, and people Worker API: complete
+- Expense and settlement UI: remaining
 - Dashboard and reporting: remaining
 - Plantation and harvest: remaining
 - Excel migration: remaining
