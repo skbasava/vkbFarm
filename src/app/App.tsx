@@ -1,8 +1,8 @@
+import { BrowserRouter } from "react-router-dom";
+import { AppErrorBoundary } from "./AppErrorBoundary";
+import { AppProviders } from "./providers";
+import { AppRouter } from "./router";
+
 export default function App() {
-  return (
-    <main>
-      <h1>VKB Farm Manager</h1>
-      <p>Farm finance and operations, built for the field.</p>
-    </main>
-  );
+  return <AppErrorBoundary><AppProviders><BrowserRouter><AppRouter /></BrowserRouter></AppProviders></AppErrorBoundary>;
 }
