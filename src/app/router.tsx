@@ -20,7 +20,7 @@ function placeholderRoute(title: string, description: string) {
   return function PlaceholderRoute() { return <section className="placeholder-route"><div className="page-intro"><span>VKB Farm / {title}</span><h2>{title}</h2><p>{description}</p></div><Card><CardContent><p className="placeholder-route__message">This workspace is ready for the {title.toLowerCase()} tools being added next.</p></CardContent></Card></section>; };
 }
 
-const ExpensesRoute = lazy(async () => ({ default: placeholderRoute("Expenses", "Track every farm purchase, payment, and contribution.") }));
+const ExpensesRoute = lazy(() => import("../features/expenses/ExpenseListPage"));
 const PlantationRoute = lazy(async () => ({ default: placeholderRoute("Plantation", "Keep crop inventory accurate across the farm.") }));
 const HarvestRoute = lazy(async () => ({ default: placeholderRoute("Harvest", "Record yield, weights, and crop sale revenue.") }));
 const ReportsRoute = lazy(async () => ({ default: placeholderRoute("Reports", "Turn the ledger into useful financial signals.") }));

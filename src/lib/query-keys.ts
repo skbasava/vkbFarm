@@ -5,6 +5,8 @@ export const queryKeys = {
   people: ["people"] as const,
   categories: ["categories"] as const,
   expenses: (filters: QueryFilters = {}) => ["expenses", filters] as const,
+  expenseContributionReport: ["reports", "contributions"] as const,
+  expenseCashflowReport: ["reports", "cashflow"] as const,
   settlements: ["settlements"] as const,
   plantation: ["plantation"] as const,
   harvests: (filters: QueryFilters = {}) => ["harvests", filters] as const,

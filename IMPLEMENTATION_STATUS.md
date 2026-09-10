@@ -4,7 +4,8 @@
 - Shared API, formatting, and Access-aware security foundations: complete
 - Expense, category, and people Worker API: complete
 - Responsive application shell and reusable UI primitives: complete
-- Expense and settlement UI: remaining
+- Responsive expense list, filters, entry, details, editing, and soft deletion: complete
+- Settlement UI: remaining
 - Dashboard and reporting: remaining
 - Plantation and harvest: remaining
 - Excel migration: remaining
