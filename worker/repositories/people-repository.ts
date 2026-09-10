@@ -67,6 +67,30 @@ function mapPersonConstraint(error: unknown): never {
   throw error;
 }
 
+function personAuditStatement(
+  db: D1Database,
+  personId: string,
+  action: "CREATE" | "UPDATE",
+  actor: string,
+  before: Person | null,
+  after: Person,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO audit_log (
+        id, entity_type, entity_id, action, actor, before_json, after_json
+      ) VALUES (?, 'person', ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      createId(),
+      personId,
+      action,
+      actor,
+      before ? JSON.stringify(before) : null,
+      JSON.stringify(after),
+    );
+}
+
 const PERSON_SELECT = `
   SELECT id, name, email, farm_role, app_role, participates_in_shared_expenses,
     active, created_at, updated_at FROM people`;
@@ -120,43 +144,66 @@ export async function getPerson(
 export async function createPerson(
   db: D1Database,
   input: PersonInput,
+  actor: string,
 ): Promise<Person> {
   const id = createId();
+  const now = new Date().toISOString();
+  const active = input.active !== false;
+  const farmRole = input.farmRole?.trim() || "owner";
+  const participatesInSharedExpenses =
+    input.participatesInSharedExpenses !== false;
+  const person: Person = {
+    id,
+    name: input.name.trim(),
+    email: input.email?.trim().toLowerCase() || null,
+    farmRole,
+    appRole: input.appRole ?? "viewer",
+    participatesInSharedExpenses,
+    active,
+    participant: active && farmRole === "owner" && participatesInSharedExpenses,
+    createdAt: now,
+    updatedAt: now,
+  };
   try {
-    await db
-      .prepare(
-        `
-        INSERT INTO people (
-          id, name, email, farm_role, app_role, participates_in_shared_expenses, active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        id,
-        input.name.trim(),
-        input.email?.trim().toLowerCase() || null,
-        input.farmRole?.trim() || "owner",
-        input.appRole ?? "viewer",
-        input.participatesInSharedExpenses === false ? 0 : 1,
-        input.active === false ? 0 : 1,
-      )
-      .run();
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO people (
+            id, name, email, farm_role, app_role, participates_in_shared_expenses,
+            active, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          id,
+          person.name,
+          person.email,
+          farmRole,
+          person.appRole,
+          participatesInSharedExpenses ? 1 : 0,
+          active ? 1 : 0,
+          now,
+          now,
+        ),
+      personAuditStatement(db, id, "CREATE", actor, null, person),
+    ]);
   } catch (error) {
     mapPersonConstraint(error);
   }
-  const person = await getPerson(db, id);
-  if (!person)
+  const storedPerson = await getPerson(db, id);
+  if (!storedPerson)
     throw new ApiHttpError(
       500,
       "STORAGE_ERROR",
       "The person could not be read after writing",
     );
-  return person;
+  return storedPerson;
 }
 
 export async function updatePerson(
   db: D1Database,
   id: string,
   input: Partial<PersonInput>,
+  actor: string,
 ): Promise<Person> {
   const current = await getPerson(db, id);
   if (!current)
@@ -165,36 +212,52 @@ export async function updatePerson(
     input.email === undefined
       ? current.email
       : input.email?.trim().toLowerCase() || null;
+  const name = input.name?.trim() ?? current.name;
+  const farmRole = input.farmRole?.trim() ?? current.farmRole;
+  const appRole = input.appRole ?? current.appRole;
+  const participatesInSharedExpenses =
+    input.participatesInSharedExpenses ?? current.participatesInSharedExpenses;
+  const active = input.active ?? current.active;
+  const updatedAt = new Date().toISOString();
+  const person: Person = {
+    ...current,
+    name,
+    email,
+    farmRole,
+    appRole,
+    participatesInSharedExpenses,
+    active,
+    participant: active && farmRole === "owner" && participatesInSharedExpenses,
+    updatedAt,
+  };
   try {
-    await db
-      .prepare(
-        `
-        UPDATE people SET name = ?, email = ?, farm_role = ?, app_role = ?,
-          participates_in_shared_expenses = ?, active = ?, updated_at = ? WHERE id = ?`,
-      )
-      .bind(
-        input.name?.trim() ?? current.name,
-        email,
-        input.farmRole?.trim() ?? current.farmRole,
-        input.appRole ?? current.appRole,
-        (input.participatesInSharedExpenses ??
-          current.participatesInSharedExpenses)
-          ? 1
-          : 0,
-        (input.active ?? current.active) ? 1 : 0,
-        new Date().toISOString(),
-        id,
-      )
-      .run();
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE people SET name = ?, email = ?, farm_role = ?, app_role = ?,
+            participates_in_shared_expenses = ?, active = ?, updated_at = ? WHERE id = ?`,
+        )
+        .bind(
+          name,
+          email,
+          farmRole,
+          appRole,
+          participatesInSharedExpenses ? 1 : 0,
+          active ? 1 : 0,
+          updatedAt,
+          id,
+        ),
+      personAuditStatement(db, id, "UPDATE", actor, current, person),
+    ]);
   } catch (error) {
     mapPersonConstraint(error);
   }
-  const person = await getPerson(db, id);
-  if (!person)
+  const storedPerson = await getPerson(db, id);
+  if (!storedPerson)
     throw new ApiHttpError(
       500,
       "STORAGE_ERROR",
       "The person could not be read after writing",
     );
-  return person;
+  return storedPerson;
 }

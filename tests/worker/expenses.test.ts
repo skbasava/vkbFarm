@@ -311,6 +311,33 @@ describe("category and people APIs", () => {
     const created = ((await createResponse.json()) as { data: JsonRecord })
       .data;
 
+    const createAudit = await env.DB.prepare(
+      `SELECT entity_type, entity_id, action, actor, before_json, after_json
+       FROM audit_log WHERE entity_id = ? AND action = 'CREATE'`,
+    )
+      .bind(created.id)
+      .first<{
+        entity_type: string;
+        entity_id: string;
+        action: string;
+        actor: string;
+        before_json: string | null;
+        after_json: string;
+      }>();
+    expect(createAudit).toMatchObject({
+      entity_type: "expense_category",
+      entity_id: created.id,
+      action: "CREATE",
+      actor: "dev@vkb.local",
+      before_json: null,
+    });
+    expect(JSON.parse(createAudit?.after_json ?? "{}")).toMatchObject({
+      id: created.id,
+      name: "Farm Equipment",
+      defaultExpenseClass: "CAPEX",
+      active: true,
+    });
+
     const expense = await createExpense({
       categoryId: created.id,
       description: "New pump",
@@ -327,6 +354,36 @@ describe("category and people APIs", () => {
     expect(patchResponse.status).toBe(200);
     await expect(patchResponse.json()).resolves.toMatchObject({
       data: { name: "Equipment", defaultExpenseClass: "OPEX", active: false },
+    });
+
+    const updateAudit = await env.DB.prepare(
+      `SELECT entity_type, entity_id, action, actor, before_json, after_json
+       FROM audit_log WHERE entity_id = ? AND action = 'UPDATE'`,
+    )
+      .bind(created.id)
+      .first<{
+        entity_type: string;
+        entity_id: string;
+        action: string;
+        actor: string;
+        before_json: string;
+        after_json: string;
+      }>();
+    expect(updateAudit).toMatchObject({
+      entity_type: "expense_category",
+      entity_id: created.id,
+      action: "UPDATE",
+      actor: "dev@vkb.local",
+    });
+    expect(JSON.parse(updateAudit?.before_json ?? "{}")).toMatchObject({
+      name: "Farm Equipment",
+      defaultExpenseClass: "CAPEX",
+      active: true,
+    });
+    expect(JSON.parse(updateAudit?.after_json ?? "{}")).toMatchObject({
+      name: "Equipment",
+      defaultExpenseClass: "OPEX",
+      active: false,
     });
 
     const historical = await request(`/expenses/${String(expense.id)}`);
@@ -358,6 +415,34 @@ describe("category and people APIs", () => {
     const created = ((await createdResponse.json()) as { data: JsonRecord })
       .data;
 
+    const createAudit = await env.DB.prepare(
+      `SELECT entity_type, entity_id, action, actor, before_json, after_json
+       FROM audit_log WHERE entity_id = ? AND action = 'CREATE'`,
+    )
+      .bind(created.id)
+      .first<{
+        entity_type: string;
+        entity_id: string;
+        action: string;
+        actor: string;
+        before_json: string | null;
+        after_json: string;
+      }>();
+    expect(createAudit).toMatchObject({
+      entity_type: "person",
+      entity_id: created.id,
+      action: "CREATE",
+      actor: "dev@vkb.local",
+      before_json: null,
+    });
+    expect(JSON.parse(createAudit?.after_json ?? "{}")).toMatchObject({
+      id: created.id,
+      name: "Giri",
+      email: "giri@example.com",
+      appRole: "editor",
+      active: true,
+    });
+
     const participants = await request("/people?participants=true");
     const participantsBody = (await participants.json()) as {
       data: JsonRecord[];
@@ -376,6 +461,34 @@ describe("category and people APIs", () => {
     expect(updated.status).toBe(200);
     await expect(updated.json()).resolves.toMatchObject({
       data: { active: false, appRole: "viewer", participant: false },
+    });
+
+    const updateAudit = await env.DB.prepare(
+      `SELECT entity_type, entity_id, action, actor, before_json, after_json
+       FROM audit_log WHERE entity_id = ? AND action = 'UPDATE'`,
+    )
+      .bind(created.id)
+      .first<{
+        entity_type: string;
+        entity_id: string;
+        action: string;
+        actor: string;
+        before_json: string;
+        after_json: string;
+      }>();
+    expect(updateAudit).toMatchObject({
+      entity_type: "person",
+      entity_id: created.id,
+      action: "UPDATE",
+      actor: "dev@vkb.local",
+    });
+    expect(JSON.parse(updateAudit?.before_json ?? "{}")).toMatchObject({
+      active: true,
+      appRole: "editor",
+    });
+    expect(JSON.parse(updateAudit?.after_json ?? "{}")).toMatchObject({
+      active: false,
+      appRole: "viewer",
     });
 
     await env.DB.prepare(

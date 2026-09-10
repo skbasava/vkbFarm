@@ -48,6 +48,30 @@ function mapCategoryConstraint(error: unknown): never {
   throw error;
 }
 
+function categoryAuditStatement(
+  db: D1Database,
+  categoryId: string,
+  action: "CREATE" | "UPDATE",
+  actor: string,
+  before: ExpenseCategory | null,
+  after: ExpenseCategory,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO audit_log (
+        id, entity_type, entity_id, action, actor, before_json, after_json
+      ) VALUES (?, 'expense_category', ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      createId(),
+      categoryId,
+      action,
+      actor,
+      before ? JSON.stringify(before) : null,
+      JSON.stringify(after),
+    );
+}
+
 export async function listCategories(
   db: D1Database,
   options: { page: number; pageSize: number; includeInactive: boolean },
@@ -93,35 +117,49 @@ export async function createCategory(
     defaultExpenseClass?: "CAPEX" | "OPEX" | null;
     active?: boolean;
   },
+  actor: string,
 ): Promise<ExpenseCategory> {
   const id = createId();
   const name = input.name.trim().replace(/\s+/g, " ");
+  const now = new Date().toISOString();
+  const category: ExpenseCategory = {
+    id,
+    name,
+    defaultExpenseClass: input.defaultExpenseClass ?? null,
+    active: input.active !== false,
+    createdAt: now,
+    updatedAt: now,
+  };
   try {
-    await db
-      .prepare(
-        `
-        INSERT INTO expense_categories (id, name, normalized_name, default_expense_class, active)
-        VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        id,
-        name,
-        normalizedCategoryName(name),
-        input.defaultExpenseClass ?? null,
-        input.active === false ? 0 : 1,
-      )
-      .run();
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO expense_categories (
+            id, name, normalized_name, default_expense_class, active, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          id,
+          name,
+          normalizedCategoryName(name),
+          category.defaultExpenseClass,
+          category.active ? 1 : 0,
+          now,
+          now,
+        ),
+      categoryAuditStatement(db, id, "CREATE", actor, null, category),
+    ]);
   } catch (error) {
     mapCategoryConstraint(error);
   }
-  const category = await getCategory(db, id);
-  if (!category)
+  const storedCategory = await getCategory(db, id);
+  if (!storedCategory)
     throw new ApiHttpError(
       500,
       "STORAGE_ERROR",
       "The category could not be read after writing",
     );
-  return category;
+  return storedCategory;
 }
 
 export async function updateCategory(
@@ -132,6 +170,7 @@ export async function updateCategory(
     defaultExpenseClass?: "CAPEX" | "OPEX" | null;
     active?: boolean;
   },
+  actor: string,
 ): Promise<ExpenseCategory> {
   const current = await getCategory(db, id);
   if (!current)
@@ -146,31 +185,40 @@ export async function updateCategory(
       ? current.defaultExpenseClass
       : input.defaultExpenseClass;
   const active = input.active ?? current.active;
+  const updatedAt = new Date().toISOString();
+  const category: ExpenseCategory = {
+    ...current,
+    name,
+    defaultExpenseClass,
+    active,
+    updatedAt,
+  };
   try {
-    await db
-      .prepare(
-        `
-        UPDATE expense_categories SET name = ?, normalized_name = ?,
-          default_expense_class = ?, active = ?, updated_at = ? WHERE id = ?`,
-      )
-      .bind(
-        name,
-        normalizedCategoryName(name),
-        defaultExpenseClass,
-        active ? 1 : 0,
-        new Date().toISOString(),
-        id,
-      )
-      .run();
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE expense_categories SET name = ?, normalized_name = ?,
+            default_expense_class = ?, active = ?, updated_at = ? WHERE id = ?`,
+        )
+        .bind(
+          name,
+          normalizedCategoryName(name),
+          defaultExpenseClass,
+          active ? 1 : 0,
+          updatedAt,
+          id,
+        ),
+      categoryAuditStatement(db, id, "UPDATE", actor, current, category),
+    ]);
   } catch (error) {
     mapCategoryConstraint(error);
   }
-  const category = await getCategory(db, id);
-  if (!category)
+  const storedCategory = await getCategory(db, id);
+  if (!storedCategory)
     throw new ApiHttpError(
       500,
       "STORAGE_ERROR",
       "The category could not be read after writing",
     );
-  return category;
+  return storedCategory;
 }

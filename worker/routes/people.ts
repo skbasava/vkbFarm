@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { ApiHttpError } from "../middleware/errors";
+import { getIdentity } from "../middleware/identity";
 import { requireRole } from "../middleware/roles";
 import {
   createPerson,
@@ -97,7 +98,10 @@ peopleRoutes.get("/", async (c) => {
 
 peopleRoutes.post("/", requireRole("admin"), async (c) => {
   const input = await parseJson(c, PersonInputSchema);
-  return c.json({ data: await createPerson(c.env.DB, input) }, 201);
+  return c.json(
+    { data: await createPerson(c.env.DB, input, getIdentity(c).email) },
+    201,
+  );
 });
 
 const updateHandler = async (c: Context<AppEnv>) => {
@@ -105,7 +109,9 @@ const updateHandler = async (c: Context<AppEnv>) => {
   const id = c.req.param("id");
   if (!id)
     throw new ApiHttpError(404, "PERSON_NOT_FOUND", "The person was not found");
-  return c.json({ data: await updatePerson(c.env.DB, id, input) });
+  return c.json({
+    data: await updatePerson(c.env.DB, id, input, getIdentity(c).email),
+  });
 };
 
 peopleRoutes.patch("/:id", requireRole("admin"), updateHandler);

@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { ApiHttpError } from "../middleware/errors";
+import { getIdentity } from "../middleware/identity";
 import { requireRole } from "../middleware/roles";
 import {
   createCategory,
@@ -93,7 +94,10 @@ categoryRoutes.get("/", async (c) => {
 
 categoryRoutes.post("/", requireRole("admin"), async (c) => {
   const input = await parseJson(c, CategoryInputSchema);
-  return c.json({ data: await createCategory(c.env.DB, input) }, 201);
+  return c.json(
+    { data: await createCategory(c.env.DB, input, getIdentity(c).email) },
+    201,
+  );
 });
 
 const updateHandler = async (c: Context<AppEnv>) => {
@@ -105,7 +109,9 @@ const updateHandler = async (c: Context<AppEnv>) => {
       "CATEGORY_NOT_FOUND",
       "The expense category was not found",
     );
-  return c.json({ data: await updateCategory(c.env.DB, id, input) });
+  return c.json({
+    data: await updateCategory(c.env.DB, id, input, getIdentity(c).email),
+  });
 };
 
 categoryRoutes.patch("/:id", requireRole("admin"), updateHandler);
