@@ -1,9 +1,10 @@
-import { BarChart3, FileText, House, Leaf, ReceiptText, Settings, Sprout, Wheat } from "lucide-react";
+import { BarChart3, FileText, House, Landmark, Leaf, ReceiptText, Settings, Sprout, Wheat } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const navigation = [
   { to: "/", label: "Dashboard", icon: House, end: true },
   { to: "/expenses", label: "Expenses", icon: ReceiptText },
+  { to: "/settlements", label: "Settlements", icon: Landmark },
   { to: "/plantation", label: "Plantation", icon: Sprout },
   { to: "/harvest", label: "Harvest", icon: Wheat },
   { to: "/reports", label: "Reports", icon: BarChart3 },
