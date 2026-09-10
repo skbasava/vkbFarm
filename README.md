@@ -28,3 +28,20 @@ environment binding with the created D1 database ID.
 
 Later implementation slices add the complete migration, seeding, and production
 deployment instructions.
+
+## Production and preview security
+
+Cloudflare Access is mandatory for this application in production. Before deploying,
+create or update a Cloudflare Access application and policy that covers **every**
+production hostname and every preview hostname that serves VKB Farm Manager. This
+includes the initial `workers.dev` or custom production hostname and any branch or
+preview hostnames enabled for the Worker. Do not leave an alternate hostname or
+direct route outside the Access application.
+
+The Worker treats `Cf-Access-Authenticated-User-Email` as an identity only on
+these Access-protected hostnames. It looks up the matching active person and role
+in D1. With `ENVIRONMENT=production`, a missing or unknown identity is rejected
+with HTTP 401; it never falls back to the local development user. The automated
+Worker identity test verifies this fail-closed behavior, but Cloudflare Access
+policy coverage is an account-level deployment requirement that Wrangler cannot
+create or validate from this repository.
