@@ -2,7 +2,7 @@
 
 ## Status
 
-Complete and committed as `feat: add responsive expense experience`.
+Complete in commit `1a1ddedc2a2d8818a7c25fd6ccc1f74e8776991b` (`feat: add responsive expense experience`).
 
 ## Delivered behavior
 
