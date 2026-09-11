@@ -13,7 +13,7 @@
 - `src/app/` — providers, router, error boundary, application shell entry points.
 - `src/components/layout/` — desktop/mobile navigation and quick actions.
 - `src/components/ui/` — shared accessible primitives and state components.
-- `src/features/expenses/` — current feature: API hooks, types, schema, responsive list/forms/detail/delete and tests.
+- `src/features/expenses/` — completed expense API hooks, types, schema, responsive list/forms/detail/delete and tests.
 - `src/lib/api-client.ts`, `format.ts`, `identity.ts`, `query-keys.ts` — shared API, display, identity, and query contracts.
 
 ## Backend
@@ -39,5 +39,5 @@
 
 ## Active checkpoint
 
-- `.codex/CURRENT_TASK.md` — exact Task 6 review-fix resume state. Load before touching source.
+- `.codex/CURRENT_TASK.md` — exact Task 7 settlement implementation state. Load before touching source.
 - `git status --short`, `git diff --stat`, `git diff`, and `git log -5 --oneline` — current source-of-truth evidence.
