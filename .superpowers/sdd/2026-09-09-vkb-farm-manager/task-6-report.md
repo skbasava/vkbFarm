@@ -45,3 +45,42 @@ Complete in commit `1a1ddedc2a2d8818a7c25fd6ccc1f74e8776991b` (`feat: add respon
 
 - Receipt attachment is a handoff to the future Documents route because the current backend does not expose a receipt-upload endpoint.
 - The build succeeds but Wrangler cannot persist its optional diagnostic log outside this sandboxed worktree.
+
+## Fix Round 1 — role-aware writes and receipt handoff
+
+### Status
+
+Complete in application/test commit `d4ac8f26cb7c338cde9428cabd5db3f9b22de361` (`fix: gate expense writes by role`).
+
+### Delivered behavior
+
+- Added protected `GET /api/v1/identity`, returning the existing Access-resolved identity envelope.
+- Added typed client identity querying and an explicit expense-write capability helper; only `admin` and `editor` roles can create, edit, or delete from the UI.
+- Viewers no longer see list/detail write actions, and direct `/expenses/new` and `/expenses/:id/edit` visits return a clear read-only state. Worker authorization remains authoritative.
+- Create-form receipt handoff is hidden until the server returns an expense ID, then links to that expense in Documents while the Add Another flow remains on the form.
+- Expanded behavior tests for active options, pending saves, field errors, receipt handoff, URL filter/sort persistence, skeleton/empty/paging states, invalidation consumers, role gates, direct-route protection, and delete confirmation. Added the Worker identity endpoint envelope contract.
+
+### Red/green evidence
+
+- RED: the identity Worker contract initially returned `404`; the unsaved create form initially exposed the Documents receipt link.
+- GREEN: the protected identity endpoint returns the expected `{ data: { email, role } }` envelope and the receipt link appears only after a create response supplies an ID.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `npm run test -- src/features/expenses` | Passed: 4 files, 16 tests. |
+| `npm run test:worker -- tests/worker/identity.test.ts` | Passed: 1 file, 5 tests. |
+| `npm run typecheck` | Passed. |
+| `npm run build` | Passed: Worker and client bundles built. |
+| `npm run lint` | Passed: 0 errors/warnings. |
+| `git diff --check` | Passed. |
+
+### Changed files
+
+- Added `src/lib/identity.ts`, `src/features/expenses/ExpenseAccess.test.tsx`, and `src/features/expenses/ExpenseApi.test.tsx`.
+- Updated the expense list/form/detail routes and components, identity query key, Worker route, Worker identity test, and focused expense test suites.
+
+### Fix-round concerns
+
+- Receipt upload still depends on the future Documents API; this round only provides the correctly ID-scoped handoff.
