@@ -2,59 +2,58 @@
 
 ## Goal
 
-Finish the Task 6 responsive expense-management review fixes, verify them, append the Task 6 fix report, commit them, and re-review before beginning Task 7.
+Implement Task 7: the deterministic shared-expense settlement engine, API, and responsive settlement UI.
 
 ## Status
 
-IN_PROGRESS
+NOT_STARTED
 
 ## User requirement
 
-Preserve the interrupted uncommitted Task 6 review-fix work byte-for-byte until it is deliberately completed. Do not begin new application work first.
+Continue the approved VKB Farm Manager plan without per-step approval. The settlement calculation must correctly split shared farm expenses between active participants, including Satish and Mahesh.
 
 ## Completed
 
-- The initial Task 6 expense UI was delivered in `1a1dded` and its initial report is in `.superpowers/sdd/2026-09-09-vkb-farm-manager/task-6-report.md`.
-- A review-fix pass has partially added authenticated identity retrieval, viewer write-action gating, an identity route/test, and coverage for access/invalidation behavior.
+- Task 6 expense UI and its review fixes are committed through `8f3c347`.
+- Role-aware create/edit/delete controls, the protected identity endpoint, ID-scoped receipt handoff, and 16 focused expense UI tests passed independent re-review.
+- The persistent context bootstrap is committed through `f9439fd`.
 
 ## Remaining
 
-- Inspect and finish the existing review-fix implementation without discarding its work.
-- Run focused frontend/Worker tests plus typecheck, build, lint, and diff checks as appropriate.
-- Append the Task 6 fix report, commit the application fix, and perform the required re-review.
+- Generate and read the Task 7 brief from the approved implementation plan.
+- Implement settlement calculation tests first, then API and responsive UI.
+- Run the Task 7 review/fix loop and checkpoint the result.
 
 ## Relevant files
 
-- `src/features/expenses/ExpenseListPage.tsx`, `ExpenseFormPage.tsx`, `ExpenseDetailPage.tsx`, and `ExpenseForm.tsx` — role-aware expense UI.
-- `src/lib/identity.ts`, `src/lib/query-keys.ts` — client identity query and cache key.
-- `worker/index.ts`, `worker/middleware/identity.ts`, `tests/worker/identity.test.ts` — protected identity endpoint and contract.
-- `src/features/expenses/ExpenseAccess.test.tsx`, `ExpenseApi.test.tsx`, and existing expense tests — review-fix coverage.
-- `.superpowers/sdd/2026-09-09-vkb-farm-manager/task-6-report.md` — append target.
+- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 7 requirements.
+- `migrations/0001_initial.sql` — people, expenses, and settlement tables.
+- `worker/repositories/expense-repository.ts`, `worker/repositories/people-repository.ts` — authoritative inputs.
+- `src/app/router.tsx`, `src/lib/query-keys.ts`, `src/lib/identity.ts` — route, cache, and role contracts.
+- `.superpowers/sdd/2026-09-09-vkb-farm-manager/progress.md` — implementation ledger.
 
 ## Files modified
 
-Modified Task 6 files: `src/features/expenses/ExpenseDetailPage.tsx`, `ExpenseForm.test.tsx`, `ExpenseForm.tsx`, `ExpenseFormPage.tsx`, `ExpenseListPage.test.tsx`, `ExpenseListPage.tsx`, `src/lib/query-keys.ts`, `tests/worker/identity.test.ts`, and `worker/index.ts`.
-
-Untracked Task 6 files: `src/features/expenses/ExpenseAccess.test.tsx`, `ExpenseApi.test.tsx`, and `src/lib/identity.ts`.
-
-Separate bootstrap-plan file currently untracked: `docs/superpowers/plans/2026-09-11-persistent-context-bootstrap.md`.
+None for Task 7 yet. Git should be clean apart from this checkpoint update before it is committed.
 
 ## Important implementation details
 
-Prior review required expense controls to respect application roles in the client while the Worker remains the authorization authority. The current fix queries `/api/v1/identity`, permits expense writes only to `admin`/`editor`, exposes the identity only after existing middleware, and adds invalidation assertions for dependent consumers. Preserve the production fail-closed identity contract.
+Use integer paise only. Shared participants are active people with `participates_in_shared_expenses = 1`; do not treat every identity as a participant. Settlement output is computed from authoritative expenses/contributions/settlements, not the workbook's F:H display cells.
 
 ## Tests
 
-The interrupted implementer did not leave verified final results for this fix pass. Treat all uncommitted work as needing execution and review.
+Last verified Task 6 commands: `npm run test -- src/features/expenses` (16 passed), `npm run test:worker -- tests/worker/identity.test.ts` (5 passed), typecheck, build, lint, and diff check passed.
 
 ## Known failures / blockers
 
-The prior Task 6 review-fix subagent exhausted its usage quota after writing partial changes. This is a handoff event, not a product failure; no source change should be discarded merely because the implementation is incomplete.
+- No active blocker.
+- Receipt file upload remains owned by Task 12.
+- Browser viewport inspection remains deferred to the final browser-capable acceptance pass.
 
 ## Next action
 
-Finish and verify the existing uncommitted Task 6 review fix before re-review.
+Generate the Task 7 brief with the SDD task-brief script, then dispatch its fresh implementer.
 
 ## Resume instructions
 
-Read `AGENTS.md`, this file, `.codex/PROJECT_STATE.md`, and Git status/diff first. Inspect only the listed Task 6 files, finish the existing diff, then update this checkpoint and the Task 6 report with actual verification evidence.
+Read the root context files and Git state, then load only Task 7 plus the listed settlement inputs. Do not re-open completed Task 6 unless a dependency mismatch appears.

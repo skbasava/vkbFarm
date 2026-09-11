@@ -2,7 +2,7 @@
 
 ## Product
 
-VKB Farm Manager is a mobile-first application for a shared farm's spending, contributions, settlements, inventory, harvest revenue, receipts, and cash flow. The current delivered slice is the foundation through responsive expense management; later plan tasks add settlements, reporting, farm operations, Excel migration, documents, settings, and final PWA/E2E readiness.
+VKB Farm Manager is a mobile-first application for a shared farm's spending, contributions, settlements, inventory, harvest revenue, receipts, and cash flow. The delivered slice now includes reviewed responsive expense management; later plan tasks add settlements, reporting, farm operations, Excel migration, documents, settings, and final PWA/E2E readiness.
 
 ## Stack
 
@@ -26,11 +26,11 @@ One Worker serves the SPA and owns `/api/v1`. Routes delegate to middleware, ser
 
 ## Implemented
 
-Foundation, D1 schema/indexes, API/money/date/error contracts, Access-aware identity and roles, people/category/expense API, responsive application shell, and the initial expense experience are committed through `92a8958`. Expense creation/editing/listing/detail/soft deletion use the existing API and responsive UI.
+Foundation, D1 schema/indexes, API/money/date/error contracts, Access-aware identity and roles, people/category/expense API, responsive application shell, and the reviewed expense experience are committed through `8f3c347`. Expense creation/editing/listing/detail/soft deletion use the existing API and responsive UI; viewer-facing write controls and direct routes are role-gated.
 
 ## In progress
 
-Task 6 review fixes are uncommitted and must be finished and verified before re-review. They add client identity awareness and an authenticated identity endpoint, gate expense write actions for viewers, and extend invalidation/access coverage. See `.codex/CURRENT_TASK.md`; Git is authoritative for the exact diff.
+Task 7 settlement engine/API/UI is next and not started. See `.codex/CURRENT_TASK.md` for the exact first action.
 
 ## Important constraints
 
@@ -42,16 +42,15 @@ Task 6 review fixes are uncommitted and must be finished and verified before re-
 
 ## Known issues
 
-- Task 6 review-fix work is incomplete because the implementing subagent exhausted its quota after writing a partial uncommitted change.
 - Receipt upload/document routes, settlements, dashboard/reports, farm operations, import, settings, and final production/PWA work are still plan tasks.
 - The `xlsx` dependency had seven high audit findings at foundation setup; reassess its replacement during importer work rather than applying incompatible automatic changes.
 
 ## Current priorities
 
-1. Finish, test, report, commit, and re-review the existing Task 6 review fixes.
-2. Continue the approved plan with Task 7 settlements.
-3. Implement dashboard/reporting, farm operations, conservative workbook import, documents, settings, and final acceptance in plan order.
+1. Implement and review Task 7 settlements.
+2. Implement dashboard/reporting and farm operations.
+3. Implement conservative workbook import, documents, settings, and final acceptance in plan order.
 
 ## Last updated
 
-2026-09-11 — persistent recovery context bootstrapped; Task 6 review-fix checkpoint recorded as in progress.
+2026-09-11 — persistent context bootstrapped and Task 6 review fixes completed; Task 7 is next.

@@ -28,10 +28,18 @@ Relevant commits: `3a03724`, `ab27b38`.
 
 ---
 
-## 2026-09-11 — Initial expense experience
+## 2026-09-11 — Reviewed expense experience
 
-Implemented responsive expense list/filtering/forms/detail/editing/soft deletion and associated tests.
+Implemented responsive expense list/filtering/forms/detail/editing/soft deletion, role-aware write controls/direct routes, protected identity lookup, ID-scoped receipt handoff, and expanded behavioral tests.
 
-Relevant commit: `1a1dded`.
+Relevant commits: `1a1dded`, `92a8958`, `d4ac8f2`, `8f3c347`.
 
-Remaining issue: review-fix work is currently in progress and uncommitted; consult `.codex/CURRENT_TASK.md` and Git rather than treating this milestone as the final Task 6 state.
+Important outcome: Task 6 passed independent re-review with 16 focused expense UI tests and 5 identity Worker tests.
+
+---
+
+## 2026-09-11 — Persistent Codex context system
+
+Added selective resume instructions, stable architecture/decision/development references, compact project state, current-task checkpointing, subsystem routing, and compressed milestone history.
+
+Relevant commits: `34b63f6`, `f9439fd`.
