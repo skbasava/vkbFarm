@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { errorHandler } from "../../worker/middleware/errors";
 import { getIdentity, identityMiddleware } from "../../worker/middleware/identity";
 import { requireRole } from "../../worker/middleware/roles";
+import app from "../../worker/index";
 import type { AppEnv, Bindings } from "../../worker/types";
 
 function createProtectedApp() {
@@ -23,6 +24,19 @@ function bindings(overrides: Partial<Bindings>): Bindings {
 }
 
 describe("identity middleware", () => {
+  it("returns the authenticated identity from the protected API endpoint", async () => {
+    const response = await app.request(
+      "http://localhost/api/v1/identity",
+      undefined,
+      bindings({ ENVIRONMENT: "local", DEV_AUTH_ENABLED: "true" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: { email: "dev@vkb.local", role: "admin" },
+    });
+  });
+
   it("supplies the explicit local development admin identity", async () => {
     const response = await createProtectedApp().request(
       "http://localhost/whoami",

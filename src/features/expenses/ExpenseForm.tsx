@@ -27,7 +27,7 @@ function serverErrors(error: unknown): ExpenseFormErrors {
 export function ExpenseForm({ expense, mode, onSaved }: ExpenseFormProps) {
   const [values, setValues] = useState(() => initialValues(expense));
   const [errors, setErrors] = useState<ExpenseFormErrors>({});
-  const [saved, setSaved] = useState(false);
+  const [savedExpense, setSavedExpense] = useState<Expense | undefined>();
   const categories = useCategories();
   const people = usePeople();
   const createExpense = useCreateExpense();
@@ -48,7 +48,7 @@ export function ExpenseForm({ expense, mode, onSaved }: ExpenseFormProps) {
     setErrors({});
     try {
       const result = await mutation.mutateAsync(toExpenseInput(values));
-      setSaved(true);
+      setSavedExpense(result);
       onSaved?.(result);
     } catch (error) {
       const fieldErrors = serverErrors(error);
@@ -56,13 +56,13 @@ export function ExpenseForm({ expense, mode, onSaved }: ExpenseFormProps) {
     }
   };
 
-  const addAnother = () => { setValues(initialValues()); setErrors({}); setSaved(false); };
+  const addAnother = () => { setValues(initialValues()); setErrors({}); setSavedExpense(undefined); };
   const submitLabel = mutation.isPending ? "Saving expense…" : mode === "create" ? "Save expense" : "Save changes";
 
   if (categories.isError || people.isError) return <ErrorState title="We could not load entry options" description="Categories and people need to be available before an expense can be recorded." action={<Button onClick={() => { void categories.refetch(); void people.refetch(); }} variant="secondary">Try again</Button>} />;
 
   return <form className="expense-form" onSubmit={submit} noValidate>
-    {saved ? <div className="expense-form__saved" role="status"><CheckCircle2 aria-hidden="true" size={19} /><span><strong>Expense saved.</strong> The ledger and balances have been refreshed.</span><Button onClick={addAnother} variant="secondary">Add another</Button></div> : null}
+    {savedExpense ? <div className="expense-form__saved" role="status"><CheckCircle2 aria-hidden="true" size={19} /><span><strong>Expense saved.</strong> The ledger and balances have been refreshed.</span><Button onClick={addAnother} variant="secondary">Add another</Button></div> : null}
     <section className="expense-form__core" aria-label="Expense details">
       <div className="expense-form__amount-row"><Field autoComplete="off" error={errors.amount} inputMode="decimal" label="Amount" onChange={(event) => update("amount", event.target.value)} placeholder="0.00" value={values.amount} /><Field error={errors.expenseDate} label="Date" onChange={(event) => update("expenseDate", event.target.value)} type="date" value={values.expenseDate} /></div>
       {categories.isLoading || people.isLoading ? <div className="expense-form__select-skeletons"><Skeleton /><Skeleton /></div> : <>
@@ -72,7 +72,7 @@ export function ExpenseForm({ expense, mode, onSaved }: ExpenseFormProps) {
       <Field error={errors.description} label="Description" onChange={(event) => update("description", event.target.value)} placeholder="What was purchased or paid?" value={values.description} />
     </section>
       <details className="expense-form__optional"><summary>More details <span>optional</span></summary><div className="expense-form__optional-body"><label className="field"><span className="field__label">Expense class</span><select className="field__input" onChange={(event) => update("expenseClass", (event.target.value || null) as ExpenseClass | null)} value={values.expenseClass ?? ""}><option value="">Unclassified</option><option value="OPEX">OPEX</option><option value="CAPEX">CAPEX</option></select></label><Field label="Paid to" onChange={(event) => update("paidTo", event.target.value)} placeholder="Supplier or recipient" value={values.paidTo} /><label className="field"><span className="field__label">Notes</span><textarea className="field__input expense-form__notes" onChange={(event) => update("notes", event.target.value)} placeholder="Add context for the farm team" value={values.notes} /></label><label className="expense-form__shared"><input checked={values.isShared} onChange={(event) => update("isShared", event.target.checked)} type="checkbox" /> Split this cost across farm partners</label></div></details>
-    <aside className="expense-form__receipt"><Paperclip aria-hidden="true" size={17} /><span><strong>Have the bill?</strong> <Link to={`/documents/new${expense ? `?expenseId=${expense.id}` : ""}`}>Attach it in Documents</Link> after saving this expense.</span></aside>
+    {expense?.id || savedExpense?.id ? <aside className="expense-form__receipt"><Paperclip aria-hidden="true" size={17} /><span><strong>Have the bill?</strong> <Link to={`/documents/new?expenseId=${expense?.id ?? savedExpense?.id}`}>Attach it in Documents</Link> after saving this expense.</span></aside> : null}
     {mutation.isError && !Object.keys(errors).length ? <p className="expense-form__submit-error" role="alert"><AlertCircle aria-hidden="true" size={16} /> {mutation.error instanceof Error ? mutation.error.message : "Could not save this expense"}</p> : null}
     <div className="expense-form__actions"><Button disabled={mutation.isPending} type="submit">{submitLabel}</Button>{mode === "edit" ? <Link className="button button--secondary" to={`/expenses/${expense?.id}`}>Cancel</Link> : null}</div>
   </form>;

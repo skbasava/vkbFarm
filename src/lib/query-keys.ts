@@ -1,6 +1,7 @@
 type QueryFilters = Record<string, boolean | number | string | undefined>;
 
 export const queryKeys = {
+  identity: ["identity"] as const,
   dashboard: ["dashboard"] as const,
   people: ["people"] as const,
   categories: ["categories"] as const,
