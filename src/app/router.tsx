@@ -26,7 +26,7 @@ const HarvestRoute = lazy(async () => ({ default: placeholderRoute("Harvest", "R
 const ReportsRoute = lazy(async () => ({ default: placeholderRoute("Reports", "Turn the ledger into useful financial signals.") }));
 const DocumentsRoute = lazy(async () => ({ default: placeholderRoute("Documents", "Keep bills and field paperwork together.") }));
 const SettingsRoute = lazy(async () => ({ default: placeholderRoute("Settings", "Manage people, categories, and application preferences.") }));
-const SettlementsRoute = lazy(async () => ({ default: placeholderRoute("Settlements", "Review and record member balance transfers.") }));
+const SettlementsRoute = lazy(() => import("../features/settlements/SettlementPage"));
 
 function LazyRoute({ children }: { children: ReactNode }) { return <Suspense fallback={<RouteSkeleton />}>{children}</Suspense>; }
 

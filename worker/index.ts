@@ -4,6 +4,7 @@ import { getIdentity, identityMiddleware } from "./middleware/identity";
 import { categoryRoutes } from "./routes/categories";
 import { expenseRoutes } from "./routes/expenses";
 import { peopleRoutes } from "./routes/people";
+import { settlementRoutes } from "./routes/settlements";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -30,5 +31,6 @@ app.get("/api/v1/identity", (c) => c.json({ data: getIdentity(c) }));
 app.route("/api/v1/expenses", expenseRoutes);
 app.route("/api/v1/categories", categoryRoutes);
 app.route("/api/v1/people", peopleRoutes);
+app.route("/api/v1/settlements", settlementRoutes);
 
 export default app;
