@@ -26,11 +26,11 @@ One Worker serves the SPA and owns `/api/v1`. Routes delegate to middleware, ser
 
 ## Implemented
 
-Foundation, D1 schema/indexes, API/money/date/error contracts, Access-aware identity and roles, people/category/expense API, responsive application shell, and the reviewed expense experience are committed through `8f3c347`. Expense creation/editing/listing/detail/soft deletion use the existing API and responsive UI; viewer-facing write controls and direct routes are role-gated.
+Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, the responsive shell, reviewed expense UI, and deterministic settlement workflow are committed through `59a081c`. Settlement payments are audited and adjust partner balances without changing expense totals.
 
 ## In progress
 
-Task 7 settlement engine/API/UI is next and not started. See `.codex/CURRENT_TASK.md` for the exact first action.
+Task 8 dashboard/reporting/CSV export is next and not started. See `.codex/CURRENT_TASK.md` for the exact first action.
 
 ## Important constraints
 
@@ -42,15 +42,15 @@ Task 7 settlement engine/API/UI is next and not started. See `.codex/CURRENT_TAS
 
 ## Known issues
 
-- Receipt upload/document routes, settlements, dashboard/reports, farm operations, import, settings, and final production/PWA work are still plan tasks.
+- Receipt upload/document routes, dashboard/reports, farm operations, import, settings, and final production/PWA work are still plan tasks.
 - The `xlsx` dependency had seven high audit findings at foundation setup; reassess its replacement during importer work rather than applying incompatible automatic changes.
 
 ## Current priorities
 
-1. Implement and review Task 7 settlements.
-2. Implement dashboard/reporting and farm operations.
-3. Implement conservative workbook import, documents, settings, and final acceptance in plan order.
+1. Implement and review Task 8 dashboard/reporting/CSV export.
+2. Implement farm operations and conservative workbook import.
+3. Implement documents, settings, and final acceptance in plan order.
 
 ## Last updated
 
-2026-09-11 — persistent context bootstrapped and Task 6 review fixes completed; Task 7 is next.
+2026-09-11 — Task 7 settlement workflow passed review; Task 8 reporting is next.

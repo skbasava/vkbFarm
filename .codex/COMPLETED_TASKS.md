@@ -43,3 +43,13 @@ Important outcome: Task 6 passed independent re-review with 16 focused expense U
 Added selective resume instructions, stable architecture/decision/development references, compact project state, current-task checkpointing, subsystem routing, and compressed milestone history.
 
 Relevant commits: `34b63f6`, `f9439fd`.
+
+---
+
+## 2026-09-11 — Settlement workflow
+
+Implemented deterministic multi-participant settlement calculation, audited settlement recording, summary/history APIs, and a responsive role-aware settlement page.
+
+Relevant commit: `59a081c`.
+
+Important outcome: exact workbook values recommend Mahesh pay Satish ₹4,918.50; recorded transfers change balances but never expense totals.

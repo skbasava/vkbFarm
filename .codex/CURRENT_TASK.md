@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement Task 7: the deterministic shared-expense settlement engine, API, and responsive settlement UI.
+Implement Task 8: dashboard, reporting APIs/UI, and CSV export.
 
 ## Status
 
@@ -10,50 +10,50 @@ NOT_STARTED
 
 ## User requirement
 
-Continue the approved VKB Farm Manager plan without per-step approval. The settlement calculation must correctly split shared farm expenses between active participants, including Satish and Mahesh.
+Continue the approved VKB Farm Manager plan without per-step approval. Reporting must derive from authoritative farm data and the reviewed settlement service rather than duplicating financial logic.
 
 ## Completed
 
-- Task 6 expense UI and its review fixes are committed through `8f3c347`.
-- Role-aware create/edit/delete controls, the protected identity endpoint, ID-scoped receipt handoff, and 16 focused expense UI tests passed independent re-review.
-- The persistent context bootstrap is committed through `f9439fd`.
+- Task 7 settlement engine/API/UI is committed in `59a081c` and passed independent review.
+- The exact legacy workbook case recommends Mahesh pay Satish 491850 paise (₹4,918.50).
+- Settlement payments adjust partner balances without altering total shared expense.
 
 ## Remaining
 
-- Generate and read the Task 7 brief from the approved implementation plan.
-- Implement settlement calculation tests first, then API and responsive UI.
-- Run the Task 7 review/fix loop and checkpoint the result.
+- Generate and read the Task 8 brief from the approved implementation plan.
+- Implement report/dashboard query tests first, then responsive UI and CSV export.
+- Run the Task 8 review/fix loop and checkpoint the result.
 
 ## Relevant files
 
-- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 7 requirements.
-- `migrations/0001_initial.sql` — people, expenses, and settlement tables.
-- `worker/repositories/expense-repository.ts`, `worker/repositories/people-repository.ts` — authoritative inputs.
-- `src/app/router.tsx`, `src/lib/query-keys.ts`, `src/lib/identity.ts` — route, cache, and role contracts.
+- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 8 requirements.
+- `worker/services/settlement-service.ts`, `worker/repositories/settlement-repository.ts` — reviewed settlement source.
+- `worker/repositories/expense-repository.ts`, `migrations/0001_initial.sql` — reporting data contracts.
+- `src/features/settlements/`, `src/features/expenses/`, `src/app/router.tsx`, `src/lib/query-keys.ts` — UI/query inputs.
 - `.superpowers/sdd/2026-09-09-vkb-farm-manager/progress.md` — implementation ledger.
 
 ## Files modified
 
-None for Task 7 yet. Git should be clean apart from this checkpoint update before it is committed.
+None for Task 8 yet. Git should be clean apart from this checkpoint update before it is committed.
 
 ## Important implementation details
 
-Use integer paise only. Shared participants are active people with `participates_in_shared_expenses = 1`; do not treat every identity as a participant. Settlement output is computed from authoritative expenses/contributions/settlements, not the workbook's F:H display cells.
+Use integer paise and ISO local-date filters. Dashboard settlement figures must consume the settlement service result. CSV output must be spreadsheet-safe and derive from the same filtered queries as on-screen reports.
 
 ## Tests
 
-Last verified Task 6 commands: `npm run test -- src/features/expenses` (16 passed), `npm run test:worker -- tests/worker/identity.test.ts` (5 passed), typecheck, build, lint, and diff check passed.
+Task 7 report records 7 focused tests and 27 full Worker tests passing, plus typecheck, lint, build, and diff check.
 
 ## Known failures / blockers
 
 - No active blocker.
-- Receipt file upload remains owned by Task 12.
-- Browser viewport inspection remains deferred to the final browser-capable acceptance pass.
+- Default `npm run test` still discovers Worker suites in the browser runner; use `npm run test:worker` for Worker tests.
+- Receipt file upload remains owned by Task 12; browser viewport inspection remains deferred to final acceptance.
 
 ## Next action
 
-Generate the Task 7 brief with the SDD task-brief script, then dispatch its fresh implementer.
+Generate the Task 8 brief with the SDD task-brief script, then dispatch its fresh implementer.
 
 ## Resume instructions
 
-Read the root context files and Git state, then load only Task 7 plus the listed settlement inputs. Do not re-open completed Task 6 unless a dependency mismatch appears.
+Read the root context files and Git state, then load only Task 8 plus the listed reporting/settlement inputs. Do not duplicate settlement calculations in dashboard code.
