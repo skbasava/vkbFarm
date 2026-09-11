@@ -33,6 +33,7 @@ export type PlantationSummary = { totalQuantity: number; cropCount: number; area
 export type ExpenseReportRow = RecentExpense & { paidTo: string | null; isShared: boolean; notes: string | null };
 export type HarvestReportRow = RecentHarvest & { notes: string | null };
 export type PlantationReportRow = { cropName: string; areaCode: string; areaName: string; quantity: number; plantingDate: string | null; notes: string | null };
+export type SettlementReportRow = { settlementDate: string; fromPersonName: string; toPersonName: string; amountPaise: number; remarks: string | null };
 
 type TotalRow = {
   expense_paise: number;
@@ -87,9 +88,11 @@ export async function getDashboardTotals(db: D1Database, currentMonth: string, c
 
 export async function listMonthlyExpenses(db: D1Database): Promise<MonthlyExpense[]> {
   const rows = await db.prepare(
-    `SELECT substr(expense_date, 1, 7) AS month, SUM(amount_paise) AS amount_paise
-     FROM expenses WHERE deleted_at IS NULL
-     GROUP BY substr(expense_date, 1, 7) ORDER BY month ASC LIMIT 24`,
+    `SELECT month, amount_paise FROM (
+       SELECT substr(expense_date, 1, 7) AS month, SUM(amount_paise) AS amount_paise
+       FROM expenses WHERE deleted_at IS NULL
+       GROUP BY substr(expense_date, 1, 7) ORDER BY month DESC LIMIT 24
+     ) ORDER BY month ASC`,
   ).all<{ month: string; amount_paise: number }>();
   return rows.results.map((row) => ({ month: row.month, amountPaise: row.amount_paise }));
 }
@@ -181,11 +184,29 @@ export async function getCashflowReport(db: D1Database, range: DateRange): Promi
   return { expensePaise, revenuePaise, netCashFlowPaise: revenuePaise - expensePaise };
 }
 
-export async function listPlantationReport(db: D1Database): Promise<PlantationReportRow[]> {
+export async function listSettlementReport(db: D1Database, range: DateRange): Promise<SettlementReportRow[]> {
+  const where = rangeWhere("s.settlement_date", range);
+  const rows = await db.prepare(
+    `SELECT s.settlement_date, payer.name AS from_person_name, receiver.name AS to_person_name,
+       s.amount_paise, s.remarks
+     FROM settlements s JOIN people payer ON payer.id = s.from_person_id
+     JOIN people receiver ON receiver.id = s.to_person_id
+     WHERE 1 = 1${where.sql}
+     ORDER BY s.settlement_date DESC, s.created_at DESC, s.id DESC LIMIT 5000`,
+  ).bind(...where.params).all<{
+    settlement_date: string; from_person_name: string; to_person_name: string; amount_paise: number; remarks: string | null;
+  }>();
+  return rows.results.map((row) => ({ settlementDate: row.settlement_date, fromPersonName: row.from_person_name, toPersonName: row.to_person_name, amountPaise: row.amount_paise, remarks: row.remarks }));
+}
+
+export async function listPlantationReport(db: D1Database, range: DateRange = {}): Promise<PlantationReportRow[]> {
+  const where = rangeWhere("p.planting_date", range);
+  const excludesUndated = range.dateFrom || range.dateTo;
   const rows = await db.prepare(
     `SELECT c.name AS crop_name, a.code AS area_code, a.name AS area_name, p.quantity, p.planting_date, p.notes
      FROM plantation_inventory p JOIN crops c ON c.id = p.crop_id JOIN farm_areas a ON a.id = p.farm_area_id
-     ORDER BY c.name COLLATE NOCASE ASC, a.code COLLATE NOCASE ASC LIMIT 5000`,
-  ).all<{ crop_name: string; area_code: string; area_name: string; quantity: number; planting_date: string | null; notes: string | null }>();
+     WHERE 1 = 1${excludesUndated ? " AND p.planting_date IS NOT NULL" : ""}${where.sql}
+     ORDER BY p.planting_date IS NULL ASC, p.planting_date DESC, c.name COLLATE NOCASE ASC, a.code COLLATE NOCASE ASC, p.id ASC LIMIT 5000`,
+  ).bind(...where.params).all<{ crop_name: string; area_code: string; area_name: string; quantity: number; planting_date: string | null; notes: string | null }>();
   return rows.results.map((row) => ({ cropName: row.crop_name, areaCode: row.area_code, areaName: row.area_name, quantity: row.quantity, plantingDate: row.planting_date, notes: row.notes }));
 }

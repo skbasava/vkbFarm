@@ -36,5 +36,7 @@ describe("ReportsPage", () => {
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/api/v1/reports/expenses?dateFrom=2026-09-01&dateTo=2026-09-30", undefined));
     expect(screen.getByRole("link", { name: "Download expenses CSV" })).toHaveAttribute("href", "/api/v1/reports/export/expenses?dateFrom=2026-09-01&dateTo=2026-09-30");
+    expect(screen.getByRole("link", { name: "Download settlements CSV" })).toHaveAttribute("href", "/api/v1/reports/export/settlements?dateFrom=2026-09-01&dateTo=2026-09-30");
+    expect(screen.getByRole("link", { name: "Download plantation CSV" })).toHaveAttribute("href", "/api/v1/reports/export/plantation?dateFrom=2026-09-01&dateTo=2026-09-30");
   });
 });

@@ -44,11 +44,22 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("heading", { name: "Net cash flow" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Plantation" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Harvest revenue" })).toBeVisible();
-    expect(screen.getByText("Satish pays Mahesh ₹374.75")).toBeVisible();
+    expect(screen.getByText("Satish owes Mahesh ₹374.75")).toBeVisible();
+    expect(screen.getByText("Mahesh receives ₹374.75")).toBeVisible();
     expect(screen.getByText("Diesel")).toBeVisible();
     expect(await screen.findByText("Date unavailable")).toBeVisible();
     expect(screen.getByText("42 plants across 1 crop and 1 area")).toBeVisible();
     expect(screen.getAllByRole("img", { name: /expense/i }).length).toBeLessThanOrEqual(4);
     expect(fetchSpy).toHaveBeenCalledWith("/api/v1/dashboard", undefined);
+  });
+
+  it("uses concise Worker-supplied chart summaries at the mobile breakpoint", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: dashboard }), { status: 200 }));
+    renderPage();
+
+    expect(await screen.findByText("Mobile expense summary")).toBeVisible();
+    expect(screen.getByText("Latest period: 2026-09 · ₹3,250.5")).toBeVisible();
+    expect(screen.queryByRole("img", { name: /expense/i })).not.toBeInTheDocument();
   });
 });

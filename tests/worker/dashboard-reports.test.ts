@@ -153,4 +153,72 @@ describe("dashboard and reports API", () => {
       },
     });
   });
+
+  it("keeps the newest 24 monthly buckets while preserving chronological chart order", async () => {
+    await seedFixture();
+    const inserts: D1PreparedStatement[] = [];
+    for (let month = 1; month <= 25; month += 1) {
+      const year = 2024 + Math.floor((month - 1) / 12);
+      const monthText = String(((month - 1) % 12) + 1).padStart(2, "0");
+      inserts.push(env.DB.prepare(
+        `INSERT INTO expenses (
+          id, expense_date, description, amount_paise, paid_by_person_id, category_id,
+          expense_class, is_shared, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(`expense_month_${month}`, `${year}-${monthText}-01`, `Month ${month}`, 100, "person_satish", "category_fuel", "OPEX", 0, `${year}-${monthText}-01T00:00:00.000Z`));
+    }
+    await env.DB.batch(inserts);
+
+    const response = await request("/dashboard");
+    const body = await response.json() as { data: { monthlyExpenses: Array<{ month: string }> } };
+    expect(body.data.monthlyExpenses).toHaveLength(24);
+    expect(body.data.monthlyExpenses[0]).toMatchObject({ month: "2024-04" });
+    expect(body.data.monthlyExpenses.at(-1)).toMatchObject({ month: "2026-09" });
+  });
+
+  it("filters and caps settlement CSV exports deterministically", async () => {
+    await seedFixture();
+    const settlements: D1PreparedStatement[] = [];
+    for (let index = 0; index < 5_001; index += 1) {
+      settlements.push(env.DB.prepare(
+        `INSERT INTO settlements (
+          id, from_person_id, to_person_id, amount_paise, settlement_date, remarks, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(`settlement_${String(index).padStart(4, "0")}`, "person_satish", "person_mahesh", 100, "2026-09-10", `Settlement ${index}`, `2026-09-10T00:00:${String(index % 60).padStart(2, "0")}.000Z`));
+    }
+    settlements.push(env.DB.prepare(
+      `INSERT INTO settlements (
+        id, from_person_id, to_person_id, amount_paise, settlement_date, remarks, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind("settlement_aug", "person_satish", "person_mahesh", 100, "2026-08-10", "Excluded", "2026-08-10T00:00:00.000Z"));
+    await env.DB.batch(settlements);
+
+    const response = await request("/reports/export/settlements?dateFrom=2026-09-01&dateTo=2026-09-30");
+    const csv = await response.text();
+    expect(csv).toContain("Settlement 5000");
+    expect(csv).not.toContain("Excluded");
+    expect(csv.trim().split("\r\n")).toHaveLength(5_001);
+  });
+
+  it("filters dated plantation exports and excludes null planting dates when a range is active", async () => {
+    await seedFixture();
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO plantation_inventory (id, crop_id, farm_area_id, quantity, planting_date, notes)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("plantation_september", "crop_banana", "area_sk", 7, "2026-09-03", "September"),
+      env.DB.prepare(
+        `INSERT INTO plantation_inventory (id, crop_id, farm_area_id, quantity, planting_date, notes)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind("plantation_undated", "crop_banana", "area_sk", 3, null, "Undated"),
+    ]);
+
+    const all = await request("/reports/export/plantation");
+    expect(await all.text()).toContain("Date unavailable");
+    const filtered = await request("/reports/export/plantation?dateFrom=2026-09-01&dateTo=2026-09-30");
+    const csv = await filtered.text();
+    expect(csv).toContain("2026-09-03");
+    expect(csv).not.toContain("2026-08-01");
+    expect(csv).not.toContain("Date unavailable");
+  });
 });
