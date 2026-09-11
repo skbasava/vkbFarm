@@ -4,6 +4,8 @@ import { getIdentity, identityMiddleware } from "./middleware/identity";
 import { categoryRoutes } from "./routes/categories";
 import { expenseRoutes } from "./routes/expenses";
 import { peopleRoutes } from "./routes/people";
+import { dashboardRoutes } from "./routes/dashboard";
+import { reportRoutes } from "./routes/reports";
 import { settlementRoutes } from "./routes/settlements";
 import type { AppEnv } from "./types";
 
@@ -32,5 +34,7 @@ app.route("/api/v1/expenses", expenseRoutes);
 app.route("/api/v1/categories", categoryRoutes);
 app.route("/api/v1/people", peopleRoutes);
 app.route("/api/v1/settlements", settlementRoutes);
+app.route("/api/v1/dashboard", dashboardRoutes);
+app.route("/api/v1/reports", reportRoutes);
 
 export default app;

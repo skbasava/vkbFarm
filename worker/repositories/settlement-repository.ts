@@ -31,6 +31,7 @@ type ParticipantRow = {
 };
 
 type ActiveParticipantRow = { id: string };
+type SettlementDateRange = { dateFrom?: string; dateTo?: string };
 
 export type SettlementWrite = {
   id: string;
@@ -73,7 +74,19 @@ export async function listSettlements(db: D1Database): Promise<Settlement[]> {
 
 export async function listSettlementContributions(
   db: D1Database,
+  range: SettlementDateRange = {},
 ): Promise<Contribution[]> {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (range.dateFrom) {
+    conditions.push("e.expense_date >= ?");
+    params.push(range.dateFrom);
+  }
+  if (range.dateTo) {
+    conditions.push("e.expense_date <= ?");
+    params.push(range.dateTo);
+  }
+  const dateSql = conditions.length ? ` AND ${conditions.join(" AND ")}` : "";
   const rows = await db
     .prepare(
       `SELECT p.id AS person_id, p.name, COALESCE(SUM(e.amount_paise), 0) AS paid_paise
@@ -81,12 +94,13 @@ export async function listSettlementContributions(
        LEFT JOIN expenses e ON e.paid_by_person_id = p.id
          AND e.is_shared = 1
          AND e.deleted_at IS NULL
+         ${dateSql}
        WHERE p.active = 1
          AND p.farm_role = 'owner'
          AND p.participates_in_shared_expenses = 1
        GROUP BY p.id, p.name
        ORDER BY p.id ASC`,
-    )
+    ).bind(...params)
     .all<ParticipantRow>();
   return rows.results.map((row) => ({
     personId: row.person_id,
@@ -97,11 +111,24 @@ export async function listSettlementContributions(
 
 export async function listRecordedSettlements(
   db: D1Database,
+  range: SettlementDateRange = {},
 ): Promise<RecordedSettlement[]> {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (range.dateFrom) {
+    conditions.push("settlement_date >= ?");
+    params.push(range.dateFrom);
+  }
+  if (range.dateTo) {
+    conditions.push("settlement_date <= ?");
+    params.push(range.dateTo);
+  }
+  const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
   const rows = await db
     .prepare(
-      "SELECT from_person_id, to_person_id, amount_paise FROM settlements ORDER BY settlement_date ASC, created_at ASC, id ASC",
+      `SELECT from_person_id, to_person_id, amount_paise FROM settlements${where} ORDER BY settlement_date ASC, created_at ASC, id ASC`,
     )
+    .bind(...params)
     .all<{
       from_person_id: string;
       to_person_id: string;

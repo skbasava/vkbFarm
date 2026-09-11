@@ -6,7 +6,7 @@
 - Responsive application shell and reusable UI primitives: complete
 - Responsive expense list, filters, entry, details, editing, and soft deletion: complete
 - Generic settlement engine, authenticated API, and responsive settlement workflow: complete
-- Dashboard and reporting: remaining
+- Dashboard, reporting, and spreadsheet-safe CSV exports: complete
 - Plantation and harvest: remaining
 - Excel migration: remaining
 - Documents and production readiness: remaining
