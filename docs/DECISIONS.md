@@ -48,10 +48,12 @@ Status: Accepted
 
 Context: The legacy workbook contains ledger rows plus summaries, formulas, and ambiguous values.
 
-Decision: Import only authoritative `Common Expense` A:E ledger rows, preserve source metadata and deterministic fingerprints, and use explicit normalization maps.
+Decision: Task 11 will import only authoritative `Common Expense` A:E ledger rows, preserve source metadata and deterministic fingerprints, and use explicit normalization maps.
 
 Reason: Reconciliation evidence must not become duplicate transactions or fabricated data.
 
-Consequences: The importer is local, idempotent, and records warnings/errors. Legacy banana harvest rows may retain a null date; API-created harvests require one.
+Implementation: Pending Task 11; no importer scripts or import workflow are implemented yet.
 
-Do not: Import summary/pivot regions, invent missing business values, or silently normalize ambiguous source values.
+Consequences: The future importer will run locally, be idempotent, and record warnings/errors. Legacy banana harvest rows may retain a null date; API-created harvests will require one.
+
+Do not: When implementing the importer, import summary/pivot regions, invent missing business values, or silently normalize ambiguous source values.
