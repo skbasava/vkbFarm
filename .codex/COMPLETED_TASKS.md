@@ -53,3 +53,13 @@ Implemented deterministic multi-participant settlement calculation, audited sett
 Relevant commit: `59a081c`.
 
 Important outcome: exact workbook values recommend Mahesh pay Satish ₹4,918.50; recorded transfers change balances but never expense totals.
+
+---
+
+## 2026-09-12 — Dashboard, reports, and CSV exports
+
+Implemented SQL-owned dashboard/report aggregations, accessible responsive charts and summaries, date-filtered reports, and bounded streamed CSV exports for expenses, settlements, plantation, and harvest.
+
+Relevant commits: `26b9893`, `1f13519`, `36c6710`, `dec69e1`.
+
+Important outcome: exported cells are RFC 4180-compatible and neutralize formula prefixes after leading whitespace; dashboard settlement figures reuse the reviewed settlement service.
