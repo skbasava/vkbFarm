@@ -99,6 +99,20 @@ describe("plantation API", () => {
     expect(audit.results.map((entry) => entry.action)).toEqual(expect.arrayContaining(["CREATE", "UPDATE", "DELETE"]));
   });
 
+  it("retains an imported null planting date when an editor changes its quantity or notes", async () => {
+    const crop = await createCrop("Banana");
+    await env.DB.prepare("INSERT INTO plantation_inventory (id, crop_id, farm_area_id, quantity, planting_date, notes, source) VALUES (?, ?, ?, ?, ?, ?, ?)").bind("legacy_cohort", crop.id, "area_mt", 12, null, "Imported row", "EXCEL").run();
+    const response = await request("/legacy_cohort", { method: "PATCH", headers: jsonHeaders, body: JSON.stringify({ quantity: 15, notes: "Counted again", plantingDate: null }) });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ data: { quantity: 15, notes: "Counted again", plantingDate: null } });
+
+    const manualResponse = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 2, plantingDate: "2026-08-02" }) });
+    expect(manualResponse.status).toBe(201);
+    const manual = (await manualResponse.json() as { data: Record<string, unknown> }).data;
+    const rejected = await request(`/${String(manual.id)}`, { method: "PATCH", headers: jsonHeaders, body: JSON.stringify({ plantingDate: null }) });
+    expect(rejected.status).toBe(422);
+  });
+
   it("rejects inactive crop and area references", async () => {
     const crop = await createCrop("Banana");
     await env.DB.batch([
@@ -158,6 +172,7 @@ describe("plantation API", () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO people (id, name, email, app_role) VALUES (?, ?, ?, ?)").bind("plantation_viewer", "Viewer", "plantation-viewer@vkb.test", "viewer"),
       env.DB.prepare("INSERT INTO people (id, name, email, app_role) VALUES (?, ?, ?, ?)").bind("plantation_editor", "Editor", "plantation-editor@vkb.test", "editor"),
+      env.DB.prepare("INSERT INTO people (id, name, email, app_role) VALUES (?, ?, ?, ?)").bind("plantation_admin", "Admin", "plantation-admin@vkb.test", "admin"),
     ]);
     const bindings: Bindings = { ...env, ENVIRONMENT: "production", RECEIPTS: env.RECEIPTS };
     const cropResponse = await app.request("http://example.com/api/v1/plantation/crops", { method: "POST", headers: { ...jsonHeaders, "Cf-Access-Authenticated-User-Email": "plantation-viewer@vkb.test" }, body: JSON.stringify({ name: "Blocked" }) }, bindings);
@@ -166,5 +181,7 @@ describe("plantation API", () => {
     expect(viewerWrite.status).toBe(403);
     const editorWrite = await app.request("http://example.com/api/v1/plantation", { method: "POST", headers: { ...jsonHeaders, "Cf-Access-Authenticated-User-Email": "plantation-editor@vkb.test" }, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 1, plantingDate: "2026-08-01" }) }, bindings);
     expect(editorWrite.status).toBe(201);
+    const adminReferenceWrite = await app.request("http://example.com/api/v1/plantation/crops", { method: "POST", headers: { ...jsonHeaders, "Cf-Access-Authenticated-User-Email": "plantation-admin@vkb.test" }, body: JSON.stringify({ name: "Admin crop" }) }, bindings);
+    expect(adminReferenceWrite.status).toBe(201);
   });
 });

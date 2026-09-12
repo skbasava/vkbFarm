@@ -28,6 +28,7 @@ export type Plantation = {
   quantity: number;
   plantingDate: string | null;
   notes: string | null;
+  source: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -36,12 +37,12 @@ export type PlantationWrite = Pick<Plantation, "id" | "cropId" | "farmAreaId" | 
 
 type CropRow = { id: string; name: string; local_name: string | null; crop_type: string | null; active: number; created_at: string; updated_at: string };
 type FarmAreaRow = { id: string; code: string; name: string; description: string | null; active: number; created_at: string; updated_at: string };
-type PlantationRow = { id: string; crop_id: string; crop_name: string; farm_area_id: string; farm_area_code: string; farm_area_name: string; quantity: number; planting_date: string | null; notes: string | null; created_at: string; updated_at: string };
+type PlantationRow = { id: string; crop_id: string; crop_name: string; farm_area_id: string; farm_area_code: string; farm_area_name: string; quantity: number; planting_date: string | null; notes: string | null; source: string | null; created_at: string; updated_at: string };
 
 const PLANTATION_SELECT = `
   SELECT p.id, p.crop_id, c.name AS crop_name, p.farm_area_id,
     a.code AS farm_area_code, a.name AS farm_area_name, p.quantity,
-    p.planting_date, p.notes, p.created_at, p.updated_at
+    p.planting_date, p.notes, p.source, p.created_at, p.updated_at
   FROM plantation_inventory p
   JOIN crops c ON c.id = p.crop_id
   JOIN farm_areas a ON a.id = p.farm_area_id`;
@@ -55,7 +56,7 @@ function mapFarmArea(row: FarmAreaRow): FarmArea {
 }
 
 function mapPlantation(row: PlantationRow): Plantation {
-  return { id: row.id, cropId: row.crop_id, cropName: row.crop_name, farmAreaId: row.farm_area_id, farmAreaCode: row.farm_area_code, farmAreaName: row.farm_area_name, quantity: row.quantity, plantingDate: row.planting_date, notes: row.notes, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, cropId: row.crop_id, cropName: row.crop_name, farmAreaId: row.farm_area_id, farmAreaCode: row.farm_area_code, farmAreaName: row.farm_area_name, quantity: row.quantity, plantingDate: row.planting_date, notes: row.notes, source: row.source, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 export async function listCrops(db: D1Database, options: { page: number; pageSize: number; includeInactive: boolean }): Promise<{ data: Crop[]; total: number }> {

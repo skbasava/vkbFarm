@@ -90,7 +90,7 @@ function writeFrom(input: PlantationInput, id: string, updatedAt: string): Plant
 }
 
 function mergeWrite(current: Plantation, input: PlantationUpdateInput): PlantationWrite {
-  return { id: current.id, cropId: input.cropId ?? current.cropId, farmAreaId: input.farmAreaId ?? current.farmAreaId, quantity: input.quantity ?? current.quantity, plantingDate: input.plantingDate ?? current.plantingDate, notes: input.notes === undefined ? current.notes : input.notes, updatedAt: new Date().toISOString() };
+  return { id: current.id, cropId: input.cropId ?? current.cropId, farmAreaId: input.farmAreaId ?? current.farmAreaId, quantity: input.quantity ?? current.quantity, plantingDate: input.plantingDate === undefined ? current.plantingDate : input.plantingDate, notes: input.notes === undefined ? current.notes : input.notes, updatedAt: new Date().toISOString() };
 }
 
 export async function createPlantation(db: D1Database, input: PlantationInput, actor: string): Promise<Plantation> {
@@ -105,6 +105,9 @@ export async function createPlantation(db: D1Database, input: PlantationInput, a
 export async function updatePlantation(db: D1Database, id: string, input: PlantationUpdateInput, actor: string): Promise<Plantation> {
   const current = await getPlantation(db, id);
   if (!current) throw new ApiHttpError(404, "PLANTATION_NOT_FOUND", "The plantation record was not found");
+  if (input.plantingDate === null && !(current.plantingDate === null && current.source === "EXCEL")) {
+    throw new ApiHttpError(422, "VALIDATION_ERROR", "Only imported cohorts with an unavailable planting date may retain it");
+  }
   const write = mergeWrite(current, input);
   await validateReferences(db, write.cropId, write.farmAreaId);
   try { await db.batch([updatePlantationStatement(db, write), auditStatement(db, "plantation", id, "UPDATE", actor, current, write)]); } catch (error) { constraint(error, "PLANTATION_EXISTS", "plantation cohort"); }

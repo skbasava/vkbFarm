@@ -20,7 +20,9 @@ export const PlantationUpdateSchema = z
     cropId: requiredText(120).optional(),
     farmAreaId: requiredText(120).optional(),
     quantity: z.number().int().nonnegative().optional(),
-    plantingDate: z.string().refine(isIsoLocalDate, "Planting date must be a valid ISO local date").optional(),
+    // A null date is accepted here only so the service can retain an existing EXCEL row
+    // whose source date was unavailable. Creates still require a valid local date.
+    plantingDate: z.string().refine(isIsoLocalDate, "Planting date must be a valid ISO local date").nullable().optional(),
     notes: optionalText(1000),
   })
   .strict()
