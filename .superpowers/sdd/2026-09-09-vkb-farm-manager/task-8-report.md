@@ -26,6 +26,26 @@
 - `npm run build` — passed.
 - `git diff --check` — passed.
 
+## Fix Round 2
+
+### Review fix delivered
+
+- CSV formula-prefix neutralization now recognizes all JavaScript whitespace, including form-feed, vertical-tab, and non-breaking space, before `=`, `+`, `-`, or `@` while preserving the exact original cell content after the apostrophe.
+
+### TDD red/green evidence
+
+- **RED:** after adding regression coverage for form-feed, vertical-tab, and NBSP prefixes, `npm run test -- tests/unit/csv.test.ts` failed 1 test; each new cell bypassed the prior space/tab/CR/LF-only expression.
+- **GREEN:** after changing the prefix check to `^\\s*[=+\\-@]`, `npm run test -- tests/unit/csv.test.ts` passed 4 tests.
+
+### Verification output
+
+- `npm run test -- src tests/unit` — 49 passed, 1 failed (pre-existing `src/features/settlements/SettlementPage.test.tsx`; it expects hard-coded `2026-09-11` but the form correctly submitted current date `2026-09-12`).
+- `npm run test:worker` — 34 tests passed across 6 files.
+- `npm run typecheck` — passed.
+- `npm run lint` — passed with zero warnings.
+- `npm run build` — passed.
+- `git diff --check` — passed.
+
 ## Notes
 
 - Worker test/build commands require the approved local Worker runtime permission because Miniflare opens a loopback listener and Wrangler writes its debug log outside the worktree.

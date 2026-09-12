@@ -1,4 +1,4 @@
-const FORMULA_PREFIX = /^[\t\r\n ]*[=+\-@]/;
+const FORMULA_PREFIX = /^\s*[=+\-@]/;
 type CsvValue = string | number | null | undefined;
 type CsvRow = readonly CsvValue[];
 

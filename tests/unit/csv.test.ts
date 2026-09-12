@@ -25,6 +25,12 @@ describe("CSV export utilities", () => {
     );
   });
 
+  it("neutralizes formula prefixes after all spreadsheet whitespace classes without changing source cells", () => {
+    expect(csvText(["Input"], [["\f=SUM(A1:A2)"], ["\v+danger"], ["\u00a0-danger"], ["\u00a0@mention"]])).toBe(
+      "\uFEFFInput\r\n'\f=SUM(A1:A2)\r\n'\v+danger\r\n'\u00a0-danger\r\n'\u00a0@mention\r\n",
+    );
+  });
+
   it("streams the BOM/header and each bounded row as separate UTF-8 chunks", async () => {
     const response = csvResponse("expenses", ["Description"], [["Diesel"], ["Pump"]], "2026-09-11");
     const reader = response.body?.getReader();
