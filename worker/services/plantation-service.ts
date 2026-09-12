@@ -4,7 +4,7 @@ import { createId } from "../utils/ids";
 import type { PlantationInput, PlantationUpdateInput } from "../validation/plantation";
 
 function normalizeName(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-IN");
+  return value.trim().toLocaleLowerCase("en-IN");
 }
 
 function referenceError(kind: "crop" | "farm area", inactive: boolean): ApiHttpError {

@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { ApiHttpError } from "../middleware/errors";
 import { getIdentity } from "../middleware/identity";
 import { requireRole } from "../middleware/roles";
-import { getPlantation, getPlantationSummaryTotals, listCrops, listFarmAreas, listPlantations } from "../repositories/plantation-repository";
+import { getPlantation, getPlantationSummaryTotals, listCrops, listFarmAreas, listPlantations, listSummaryCrops, listSummaryFarmAreas } from "../repositories/plantation-repository";
 import { createCrop, createFarmArea, createPlantation, softDeletePlantation, updateCrop, updateFarmArea, updatePlantation } from "../services/plantation-service";
 import type { AppEnv } from "../types";
 import { CropInputSchema, CropUpdateSchema, FarmAreaInputSchema, FarmAreaUpdateSchema, PlantationInputSchema, PlantationUpdateSchema } from "../validation/plantation";
@@ -74,8 +74,8 @@ plantationRoutes.put("/farm-areas/:id", requireRole("admin"), updateFarmAreaHand
 
 plantationRoutes.get("/summary", async (c) => {
   const [areas, crops, inventory] = await Promise.all([
-    listFarmAreas(c.env.DB, { page: 1, pageSize: 100, includeInactive: false }),
-    listCrops(c.env.DB, { page: 1, pageSize: 100, includeInactive: false }),
+    listSummaryFarmAreas(c.env.DB),
+    listSummaryCrops(c.env.DB),
     getPlantationSummaryTotals(c.env.DB),
   ]);
   const quantities = new Map<string, Map<string, number>>();
@@ -84,17 +84,17 @@ plantationRoutes.get("/summary", async (c) => {
     row.set(record.farmAreaId, record.quantity);
     quantities.set(record.cropId, row);
   }
-  const areaTotals = Object.fromEntries(areas.data.map((area) => [area.id, 0]));
-  const rows = crops.data.map((crop) => {
+  const areaTotals = Object.fromEntries(areas.map((area) => [area.id, 0]));
+  const rows = crops.map((crop) => {
     const cropQuantities = quantities.get(crop.id) ?? new Map<string, number>();
-    const cells = Object.fromEntries(areas.data.map((area) => {
+    const cells = Object.fromEntries(areas.map((area) => {
       const quantity = cropQuantities.get(area.id) ?? 0;
       areaTotals[area.id] = (areaTotals[area.id] ?? 0) + quantity;
       return [area.id, quantity];
     }));
     return { cropId: crop.id, cropName: crop.name, quantities: cells, totalQuantity: [...cropQuantities.values()].reduce((total, quantity) => total + quantity, 0) };
-  }).filter((row) => row.totalQuantity > 0);
-  return c.json({ data: { areas: areas.data, rows, areaTotals, totalQuantity: inventory.totalQuantity } });
+  });
+  return c.json({ data: { areas, rows, areaTotals, totalQuantity: inventory.totalQuantity, cohortCount: inventory.cohortCount, cohorts: inventory.cohorts } });
 });
 
 plantationRoutes.get("/", async (c) => {

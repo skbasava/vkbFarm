@@ -81,6 +81,20 @@ export async function listFarmAreas(db: D1Database, options: { page: number; pag
   return { data: rows.results.map(mapFarmArea), total: count?.total ?? 0 };
 }
 
+export async function listSummaryCrops(db: D1Database): Promise<Crop[]> {
+  const rows = await db.prepare(`SELECT id, name, local_name, crop_type, active, created_at, updated_at FROM crops c
+    WHERE c.active = 1 OR EXISTS (SELECT 1 FROM plantation_inventory p WHERE p.crop_id = c.id AND p.deleted_at IS NULL)
+    ORDER BY name COLLATE NOCASE ASC, id ASC`).all<CropRow>();
+  return rows.results.map(mapCrop);
+}
+
+export async function listSummaryFarmAreas(db: D1Database): Promise<FarmArea[]> {
+  const rows = await db.prepare(`SELECT id, code, name, description, active, created_at, updated_at FROM farm_areas a
+    WHERE a.active = 1 OR EXISTS (SELECT 1 FROM plantation_inventory p WHERE p.farm_area_id = a.id AND p.deleted_at IS NULL)
+    ORDER BY code COLLATE NOCASE ASC, id ASC`).all<FarmAreaRow>();
+  return rows.results.map(mapFarmArea);
+}
+
 export async function getFarmArea(db: D1Database, id: string): Promise<FarmArea | null> {
   const row = await db.prepare("SELECT id, code, name, description, active, created_at, updated_at FROM farm_areas WHERE id = ? LIMIT 1").bind(id).first<FarmAreaRow>();
   return row ? mapFarmArea(row) : null;
@@ -107,14 +121,17 @@ export async function getPlantation(db: D1Database, id: string): Promise<Plantat
 export async function getPlantationSummaryTotals(db: D1Database): Promise<{
   cells: Array<{ cropId: string; cropName: string; farmAreaId: string; quantity: number }>;
   totalQuantity: number;
+  cohortCount: number;
+  cohorts: Plantation[];
 }> {
-  const [cells, total] = await Promise.all([
+  const [cells, total, cohorts] = await Promise.all([
     db.prepare(`SELECT p.crop_id, c.name AS crop_name, p.farm_area_id, SUM(p.quantity) AS quantity
       FROM plantation_inventory p JOIN crops c ON c.id = p.crop_id
       WHERE p.deleted_at IS NULL GROUP BY p.crop_id, c.name, p.farm_area_id`).all<{ crop_id: string; crop_name: string; farm_area_id: string; quantity: number }>(),
-    db.prepare("SELECT COALESCE(SUM(quantity), 0) AS total_quantity FROM plantation_inventory WHERE deleted_at IS NULL").first<{ total_quantity: number }>(),
+    db.prepare("SELECT COALESCE(SUM(quantity), 0) AS total_quantity, COUNT(*) AS cohort_count FROM plantation_inventory WHERE deleted_at IS NULL").first<{ total_quantity: number; cohort_count: number }>(),
+    db.prepare(`${PLANTATION_SELECT} WHERE p.deleted_at IS NULL ORDER BY c.name COLLATE NOCASE ASC, a.code COLLATE NOCASE ASC, p.planting_date DESC, p.created_at DESC, p.id DESC`).all<PlantationRow>(),
   ]);
-  return { cells: cells.results.map((cell) => ({ cropId: cell.crop_id, cropName: cell.crop_name, farmAreaId: cell.farm_area_id, quantity: cell.quantity })), totalQuantity: total?.total_quantity ?? 0 };
+  return { cells: cells.results.map((cell) => ({ cropId: cell.crop_id, cropName: cell.crop_name, farmAreaId: cell.farm_area_id, quantity: cell.quantity })), totalQuantity: total?.total_quantity ?? 0, cohortCount: total?.cohort_count ?? 0, cohorts: cohorts.results.map(mapPlantation) };
 }
 
 export function insertPlantationStatement(db: D1Database, plantation: PlantationWrite): D1PreparedStatement {

@@ -36,6 +36,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM plantation_inventory"),
     env.DB.prepare("DELETE FROM crops"),
     env.DB.prepare("DELETE FROM farm_areas WHERE id NOT IN (?, ?)").bind("area_mt", "area_sk"),
+    env.DB.prepare("UPDATE farm_areas SET active = 1 WHERE id IN (?, ?)").bind("area_mt", "area_sk"),
   ]);
 });
 
@@ -52,19 +53,22 @@ describe("plantation API", () => {
     ]));
   });
 
-  it("keeps separate cohorts for the same crop and area and returns SQL-owned matrix totals", async () => {
+  it("keeps separate same-day cohorts and summarizes the same crop across MT and SK", async () => {
     const crop = await createCrop("Banana");
     const first = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 42, plantingDate: "2026-08-01" }) });
-    const second = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 8, plantingDate: "2026-09-01" }) });
+    const second = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 8, plantingDate: "2026-08-01" }) });
+    const third = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_sk", quantity: 5, plantingDate: "2026-08-01" }) });
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
+    expect(third.status).toBe(201);
 
     const response = await request("/summary");
     await expect(response.json()).resolves.toMatchObject({
       data: {
-        totalQuantity: 50,
-        rows: [{ cropName: "Banana", totalQuantity: 50, quantities: { area_mt: 50 } }],
-        areaTotals: { area_mt: 50, area_sk: 0 },
+        totalQuantity: 55,
+        cohortCount: 3,
+        rows: [{ cropName: "Banana", totalQuantity: 55, quantities: { area_mt: 50, area_sk: 5 } }],
+        areaTotals: { area_mt: 50, area_sk: 5 },
       },
     });
     const listed = await request(`?cropId=${String(crop.id)}&farmAreaId=area_mt`);
@@ -79,6 +83,8 @@ describe("plantation API", () => {
     }
     const response = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 1, plantingDate: null }) });
     expect(response.status).toBe(422);
+    const invalidDate = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 1, plantingDate: "2026-02-30" }) });
+    expect(invalidDate.status).toBe(422);
   });
 
   it("updates and soft deletes cohorts with an atomic audit trail", async () => {
@@ -105,6 +111,40 @@ describe("plantation API", () => {
     expect(areaResponse.status).toBe(409);
   });
 
+  it("retains zero-quantity cohorts and inactive historical labels in the unbounded summary", async () => {
+    const crop = await createCrop("Banana");
+    const created = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 0, plantingDate: "2026-08-01" }) });
+    expect(created.status).toBe(201);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE crops SET active = 0 WHERE id = ?").bind(crop.id),
+      env.DB.prepare("UPDATE farm_areas SET active = 0 WHERE id = ?").bind("area_mt"),
+    ]);
+    const summary = await request("/summary");
+    await expect(summary.json()).resolves.toMatchObject({
+      data: {
+        cohortCount: 1,
+        rows: [{ cropId: crop.id, cropName: "Banana", totalQuantity: 0 }],
+        areas: expect.arrayContaining([expect.objectContaining({ id: "area_mt", code: "MT", active: false })]),
+        cohorts: [expect.objectContaining({ cropName: "Banana", farmAreaCode: "MT", quantity: 0 })],
+      },
+    });
+  });
+
+  it("includes active farm areas beyond the first hundred in summary matrix columns", async () => {
+    const crop = await createCrop("Banana");
+    const areas: D1PreparedStatement[] = [];
+    for (let index = 0; index < 101; index += 1) {
+      areas.push(env.DB.prepare("INSERT INTO farm_areas (id, code, name, normalized_name) VALUES (?, ?, ?, ?)").bind(`area_extra_${index}`, `X${index}`, `Extra ${index}`, `extra ${index}`));
+    }
+    await env.DB.batch(areas);
+    const response = await request("", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_extra_100", quantity: 3, plantingDate: "2026-08-01" }) });
+    expect(response.status).toBe(201);
+    const summary = await request("/summary");
+    const body = await summary.json() as { data: { areas: Array<{ id: string }>; rows: Array<{ quantities: Record<string, number> }> } };
+    expect(body.data.areas).toHaveLength(103);
+    expect(body.data.rows[0]?.quantities.area_extra_100).toBe(3);
+  });
+
   it("binds filter values instead of interpreting injected filter text as SQL", async () => {
     await createPlantation();
     const response = await request("?cropId=missing%27%20OR%201%3D1%20--");
@@ -113,10 +153,18 @@ describe("plantation API", () => {
     expect(count?.count).toBe(1);
   });
 
-  it("protects reference administration and cohort writes by role", async () => {
-    await env.DB.prepare("INSERT INTO people (id, name, email, app_role) VALUES (?, ?, ?, ?)").bind("plantation_viewer", "Viewer", "plantation-viewer@vkb.test", "viewer").run();
+  it("allows editor and admin mutations while denying viewers plantation writes", async () => {
+    const crop = await createCrop("Banana");
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO people (id, name, email, app_role) VALUES (?, ?, ?, ?)").bind("plantation_viewer", "Viewer", "plantation-viewer@vkb.test", "viewer"),
+      env.DB.prepare("INSERT INTO people (id, name, email, app_role) VALUES (?, ?, ?, ?)").bind("plantation_editor", "Editor", "plantation-editor@vkb.test", "editor"),
+    ]);
     const bindings: Bindings = { ...env, ENVIRONMENT: "production", RECEIPTS: env.RECEIPTS };
     const cropResponse = await app.request("http://example.com/api/v1/plantation/crops", { method: "POST", headers: { ...jsonHeaders, "Cf-Access-Authenticated-User-Email": "plantation-viewer@vkb.test" }, body: JSON.stringify({ name: "Blocked" }) }, bindings);
     expect(cropResponse.status).toBe(403);
+    const viewerWrite = await app.request("http://example.com/api/v1/plantation", { method: "POST", headers: { ...jsonHeaders, "Cf-Access-Authenticated-User-Email": "plantation-viewer@vkb.test" }, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 1, plantingDate: "2026-08-01" }) }, bindings);
+    expect(viewerWrite.status).toBe(403);
+    const editorWrite = await app.request("http://example.com/api/v1/plantation", { method: "POST", headers: { ...jsonHeaders, "Cf-Access-Authenticated-User-Email": "plantation-editor@vkb.test" }, body: JSON.stringify({ cropId: crop.id, farmAreaId: "area_mt", quantity: 1, plantingDate: "2026-08-01" }) }, bindings);
+    expect(editorWrite.status).toBe(201);
   });
 });
