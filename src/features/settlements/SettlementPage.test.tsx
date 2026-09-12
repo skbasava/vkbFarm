@@ -63,12 +63,13 @@ describe("SettlementPage", () => {
     renderPage();
     await screen.findByText("Mahesh owes ₹2,000");
 
+    const paymentDate = (screen.getByLabelText("Payment date") as HTMLInputElement).value;
     await user.selectOptions(screen.getByLabelText("From"), "person_mahesh");
     await user.selectOptions(screen.getByLabelText("To"), "person_satish");
     await user.clear(screen.getByLabelText("Amount"));
     await user.type(screen.getByLabelText("Amount"), "500.00");
     await user.click(screen.getByRole("button", { name: "Record payment" }));
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/api/v1/settlements", expect.objectContaining({ method: "POST", body: JSON.stringify({ fromPersonId: "person_mahesh", toPersonId: "person_satish", amount: "500.00", settlementDate: "2026-09-11", remarks: null }) })));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith("/api/v1/settlements", expect.objectContaining({ method: "POST", body: JSON.stringify({ fromPersonId: "person_mahesh", toPersonId: "person_satish", amount: "500.00", settlementDate: paymentDate, remarks: null }) })));
   });
 });
