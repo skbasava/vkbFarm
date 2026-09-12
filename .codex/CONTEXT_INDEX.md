@@ -16,6 +16,7 @@
 - `src/features/expenses/` — completed expense API hooks, types, schema, responsive list/forms/detail/delete and tests.
 - `src/features/settlements/` — settlement queries, responsive summary/form/history UI, and tests.
 - `src/features/dashboard/`, `src/features/reports/` — dashboard/report queries, responsive views, filters, charts, and tests.
+- `src/features/plantation/` — reviewed plantation summaries, cohort forms/editing, responsive matrix/cards, and paginated reference loading.
 - `src/lib/api-client.ts`, `format.ts`, `identity.ts`, `query-keys.ts` — shared API, display, identity, and query contracts.
 
 ## Backend
@@ -26,12 +27,14 @@
 - `worker/services/expense-service.ts` and `worker/repositories/expense-repository.ts` — expense rules and D1 queries.
 - `worker/services/settlement-service.ts`, `worker/repositories/settlement-repository.ts`, `worker/routes/settlements.ts` — deterministic settlement calculation, persistence, and API.
 - `worker/repositories/report-repository.ts`, `worker/services/report-service.ts`, `worker/routes/dashboard.ts`, `worker/routes/reports.ts`, `worker/utils/csv.ts` — report aggregation and streamed export contracts.
+- `worker/validation/plantation.ts`, `worker/repositories/plantation-repository.ts`, `worker/services/plantation-service.ts`, `worker/routes/plantation.ts` — reviewed reference administration and distinct plantation-cohort APIs.
 - `worker/validation/expenses.ts`, `worker/utils/money.ts`, `dates.ts` — input and representation invariants.
 
 ## Database
 
 - `migrations/0001_initial.sql` — normalized schema and reference seeds.
 - `migrations/0002_indexes.sql` — supporting indexes.
+- `migrations/0003_plantation_soft_delete_and_reference_normalization.sql`, `migrations/0004_plantation_distinct_cohorts.sql` — collision-safe reference normalization and distinct plantation cohorts.
 - `tests/fixtures/database.ts` — Worker-test database setup.
 
 ## Configuration and testing
@@ -43,5 +46,5 @@
 
 ## Active checkpoint
 
-- `.codex/CURRENT_TASK.md` — exact Task 9 plantation implementation state. Load before touching source.
+- `.codex/CURRENT_TASK.md` — exact Task 10 harvest implementation state. Load before touching source.
 - `git status --short`, `git diff --stat`, `git diff`, and `git log -5 --oneline` — current source-of-truth evidence.

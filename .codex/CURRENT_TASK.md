@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement Task 9: plantation inventory, crop/farm-area administration APIs, and responsive plantation UI.
+Implement Task 10: harvest tracking, exact revenue rules, CRUD/filter APIs, and responsive harvest reporting UI.
 
 ## Status
 
@@ -10,39 +10,41 @@ NOT_STARTED
 
 ## User requirement
 
-Continue the approved VKB Farm Manager plan without per-step approval. Plantation inventory must preserve distinct planting cohorts and legacy source traceability.
+Continue the approved VKB Farm Manager plan without per-step approval. Revenue calculations must avoid binary-float drift, manual/API harvests require valid dates, and legacy EXCEL rows may retain unavailable dates.
 
 ## Completed
 
-- Task 8 dashboard/reporting/CSV export is committed through `36c6710` and passed its fix re-review.
-- CSV exports stream bounded rows, neutralize formula prefixes after all leading whitespace, and retain date filters.
-- The date-sensitive settlement UI test was stabilized in `dec69e1` without production changes.
+- Task 9 plantation inventory is implemented and independently approved through `c196ff9`.
+- Distinct same-day cohorts are retained; normalized reference collisions fail before schema mutation; summaries include inactive historical references and zero-quantity cohorts.
+- Individual cohort PATCH editing is available, imported null dates are preserved, and form references paginate beyond 100.
+- Controller verification passed 28 frontend tests, 44 Worker tests, typecheck, lint, and production build.
 
 ## Remaining
 
-- Generate and read the Task 9 brief from the approved implementation plan.
-- Implement crop/farm-area/plantation API tests first, then responsive inventory UI.
-- Run the Task 9 review/fix loop and checkpoint the result.
+- Generate and read the Task 10 brief from the approved implementation plan.
+- Implement exact scaled-decimal revenue tests and harvest Worker APIs first, then responsive harvest UI.
+- Run the Task 10 review/fix loop and checkpoint the result.
 
 ## Relevant files
 
-- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 9 requirements.
-- `migrations/0001_initial.sql` — crops, farm areas, and plantation inventory tables.
-- `worker/repositories/report-repository.ts` — plantation summary consumer.
+- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 10 requirements.
+- `migrations/0001_initial.sql` — harvest schema and legacy-null constraints.
+- `worker/utils/money.ts`, `worker/utils/dates.ts` — exact amount and farm-date contracts.
+- `worker/repositories/report-repository.ts` — dashboard/report harvest consumers.
 - `src/app/router.tsx`, `src/lib/query-keys.ts`, `src/lib/identity.ts`, `src/components/ui/` — UI/query/access contracts.
 - `.superpowers/sdd/2026-09-09-vkb-farm-manager/progress.md` — implementation ledger.
 
 ## Files modified
 
-None for Task 9 yet. Git should be clean apart from this checkpoint update before it is committed.
+None for Task 10 yet. Git should be clean apart from this checkpoint update before it is committed.
 
 ## Important implementation details
 
-Plantation rows represent cohorts, not a crop/area singleton. Multiple cohorts may share crop and area when planting dates differ or are absent. Manual rows require real ISO local dates; only legacy imported rows may retain unavailable dates.
+Parse decimal kilograms as scaled integers before multiplying by paise-per-kilogram. Calculated revenue is the default; any actual-revenue override requires a reason. Manual/API rows require real ISO local dates, while legacy EXCEL rows may retain null dates and cached actual revenue.
 
 ## Tests
 
-Task 8 report records 49 browser/unit and 34 Worker tests passing before the separate date-stability commit; the stability report records the final browser/unit suite at 50 passed.
+Task 9 controller verification: 28 frontend tests and 44 Worker tests passed; typecheck, lint, and production build passed.
 
 ## Known failures / blockers
 
@@ -51,8 +53,8 @@ Task 8 report records 49 browser/unit and 34 Worker tests passing before the sep
 
 ## Next action
 
-Generate the Task 9 brief with the SDD task-brief script, then dispatch its fresh implementer.
+Generate the Task 10 brief with the SDD task-brief script, then dispatch its fresh implementer.
 
 ## Resume instructions
 
-Read the root context files and Git state, then load only Task 9 plus the listed plantation schema/report consumers. Preserve existing dashboard contracts.
+Read the root context files and Git state, then load only Task 10 plus the listed harvest schema/report consumers. Preserve existing dashboard/report contracts.

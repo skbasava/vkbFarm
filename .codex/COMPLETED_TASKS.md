@@ -63,3 +63,13 @@ Implemented SQL-owned dashboard/report aggregations, accessible responsive chart
 Relevant commits: `26b9893`, `1f13519`, `36c6710`, `dec69e1`.
 
 Important outcome: exported cells are RFC 4180-compatible and neutralize formula prefixes after leading whitespace; dashboard settlement figures reuse the reviewed settlement service.
+
+---
+
+## 2026-09-12 — Plantation inventory
+
+Implemented crop and farm-area administration, distinct plantation cohorts, collision-safe normalized reference names, audited role-aware APIs, consistent historical summaries, and responsive matrix/card views with individual cohort editing.
+
+Relevant commits: `11a407d`, `68681e8`, `c196ff9`.
+
+Important outcome: same crop/area/date cohorts remain separate; zero-quantity and inactive-reference history remains visible; imported undated EXCEL cohorts keep their null date during unrelated edits.

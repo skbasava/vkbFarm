@@ -2,7 +2,7 @@
 
 ## Product
 
-VKB Farm Manager is a mobile-first application for a shared farm's spending, contributions, settlements, inventory, harvest revenue, receipts, and cash flow. The delivered slice now includes reviewed responsive expense management; later plan tasks add settlements, reporting, farm operations, Excel migration, documents, settings, and final PWA/E2E readiness.
+VKB Farm Manager is a mobile-first application for a shared farm's spending, contributions, settlements, inventory, harvest revenue, receipts, and cash flow. The delivered slice now includes reviewed expenses, settlements, reporting, and plantation inventory; later plan tasks add harvest operations, Excel migration, documents, settings, and final PWA/E2E readiness.
 
 ## Stack
 
@@ -26,11 +26,11 @@ One Worker serves the SPA and owns `/api/v1`. Routes delegate to middleware, ser
 
 ## Implemented
 
-Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, responsive shell, settlement workflow, and financial dashboard/reporting are committed through `dec69e1`. CSV exports are bounded, streamed, date-filtered, and spreadsheet-injection safe.
+Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, responsive shell, settlements, financial reporting, and plantation inventory are committed through `c196ff9`. Plantation cohorts remain distinct, reference normalization is migration-safe, and legacy undated cohorts are preserved.
 
 ## In progress
 
-Task 9 plantation management is next and not started. See `.codex/CURRENT_TASK.md` for the exact first action.
+Task 10 harvest tracking is next and not started. See `.codex/CURRENT_TASK.md` for the exact first action.
 
 ## Important constraints
 
@@ -42,15 +42,15 @@ Task 9 plantation management is next and not started. See `.codex/CURRENT_TASK.m
 
 ## Known issues
 
-- Receipt upload/document routes, plantation/harvest operations, import, settings, and final production/PWA work are still plan tasks.
+- Receipt upload/document routes, harvest operations, import, settings, and final production/PWA work are still plan tasks.
 - The `xlsx` dependency had seven high audit findings at foundation setup; reassess its replacement during importer work rather than applying incompatible automatic changes.
 
 ## Current priorities
 
-1. Implement and review Task 9 plantation management.
-2. Implement harvest operations and conservative workbook import.
+1. Implement and review Task 10 harvest operations.
+2. Implement the conservative workbook import.
 3. Implement documents, settings, and final acceptance in plan order.
 
 ## Last updated
 
-2026-09-12 — Task 8 dashboard/reporting passed review; Task 9 plantation is next.
+2026-09-12 — Task 9 plantation passed review; Task 10 harvest tracking is next.
