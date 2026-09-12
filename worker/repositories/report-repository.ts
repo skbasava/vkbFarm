@@ -137,7 +137,7 @@ export async function listRecentHarvests(db: D1Database, limit = 8): Promise<Rec
 export async function getPlantationSummary(db: D1Database): Promise<PlantationSummary> {
   const row = await db.prepare(
     `SELECT COALESCE(SUM(quantity), 0) AS total_quantity, COUNT(DISTINCT crop_id) AS crop_count,
-       COUNT(DISTINCT farm_area_id) AS area_count FROM plantation_inventory`,
+       COUNT(DISTINCT farm_area_id) AS area_count FROM plantation_inventory WHERE deleted_at IS NULL`,
   ).first<{ total_quantity: number; crop_count: number; area_count: number }>();
   return { totalQuantity: numberValue(row?.total_quantity), cropCount: numberValue(row?.crop_count), areaCount: numberValue(row?.area_count) };
 }
@@ -205,7 +205,7 @@ export async function listPlantationReport(db: D1Database, range: DateRange = {}
   const rows = await db.prepare(
     `SELECT c.name AS crop_name, a.code AS area_code, a.name AS area_name, p.quantity, p.planting_date, p.notes
      FROM plantation_inventory p JOIN crops c ON c.id = p.crop_id JOIN farm_areas a ON a.id = p.farm_area_id
-     WHERE 1 = 1${excludesUndated ? " AND p.planting_date IS NOT NULL" : ""}${where.sql}
+     WHERE p.deleted_at IS NULL${excludesUndated ? " AND p.planting_date IS NOT NULL" : ""}${where.sql}
      ORDER BY p.planting_date IS NULL ASC, p.planting_date DESC, c.name COLLATE NOCASE ASC, a.code COLLATE NOCASE ASC, p.id ASC LIMIT 5000`,
   ).bind(...where.params).all<{ crop_name: string; area_code: string; area_name: string; quantity: number; planting_date: string | null; notes: string | null }>();
   return rows.results.map((row) => ({ cropName: row.crop_name, areaCode: row.area_code, areaName: row.area_name, quantity: row.quantity, plantingDate: row.planting_date, notes: row.notes }));

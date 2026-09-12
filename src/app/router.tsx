@@ -14,7 +14,7 @@ function placeholderRoute(title: string, description: string) {
 
 const ExpensesRoute = lazy(() => import("../features/expenses/ExpenseListPage"));
 const DashboardRoute = lazy(() => import("../features/dashboard/DashboardPage"));
-const PlantationRoute = lazy(async () => ({ default: placeholderRoute("Plantation", "Keep crop inventory accurate across the farm.") }));
+const PlantationRoute = lazy(() => import("../features/plantation/PlantationPage"));
 const HarvestRoute = lazy(async () => ({ default: placeholderRoute("Harvest", "Record yield, weights, and crop sale revenue.") }));
 const ReportsRoute = lazy(() => import("../features/reports/ReportsPage"));
 const DocumentsRoute = lazy(async () => ({ default: placeholderRoute("Documents", "Keep bills and field paperwork together.") }));
