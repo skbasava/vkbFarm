@@ -8,6 +8,6 @@
 - Generic settlement engine, authenticated API, and responsive settlement workflow: complete
 - Dashboard, reporting, and spreadsheet-safe CSV exports: complete
 - Plantation inventory and crop/farm-area administration: complete
-- Harvest tracking and revenue: remaining
+- Harvest tracking and exact revenue: implemented
 - Excel migration: remaining
 - Documents and production readiness: remaining

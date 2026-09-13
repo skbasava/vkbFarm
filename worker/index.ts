@@ -8,6 +8,7 @@ import { dashboardRoutes } from "./routes/dashboard";
 import { reportRoutes } from "./routes/reports";
 import { settlementRoutes } from "./routes/settlements";
 import { plantationRoutes } from "./routes/plantation";
+import { harvestRoutes } from "./routes/harvests";
 import type { AppEnv } from "./types";
 
 const app = new Hono<AppEnv>();
@@ -38,5 +39,6 @@ app.route("/api/v1/settlements", settlementRoutes);
 app.route("/api/v1/dashboard", dashboardRoutes);
 app.route("/api/v1/reports", reportRoutes);
 app.route("/api/v1/plantation", plantationRoutes);
+app.route("/api/v1/harvests", harvestRoutes);
 
 export default app;
