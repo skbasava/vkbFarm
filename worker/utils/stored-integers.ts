@@ -24,5 +24,7 @@ export function exactMoneyToNumber(value: bigint): number {
 }
 
 export function safeMoneyDifference(left: number, right: number): number {
-  return exactMoneyToNumber(BigInt(left) - BigInt(right));
+  const safeLeft = storedMoneyToNumber(left);
+  const safeRight = storedMoneyToNumber(right);
+  return exactMoneyToNumber(BigInt(safeLeft) - BigInt(safeRight));
 }

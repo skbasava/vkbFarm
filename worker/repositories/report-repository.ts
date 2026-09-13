@@ -38,11 +38,11 @@ export type PlantationReportRow = { cropName: string; areaCode: string; areaName
 export type SettlementReportRow = { settlementDate: string; fromPersonName: string; toPersonName: string; amountPaise: number; remarks: string | null };
 
 type TotalRow = {
-  expense_paise: number;
-  current_month_expense_paise: number;
-  current_year_expense_paise: number;
-  capex_paise: number;
-  opex_paise: number;
+  expense_paise: string;
+  current_month_expense_paise: string;
+  current_year_expense_paise: string;
+  capex_paise: string;
+  opex_paise: string;
   revenue_paise: string;
 };
 
@@ -67,22 +67,22 @@ function rangeWhere(column: string, range: DateRange): { sql: string; params: st
 export async function getDashboardTotals(db: D1Database, currentMonth: string, currentYear: string): Promise<DashboardTotals> {
   const row = await db.prepare(
     `SELECT
-      COALESCE(SUM(e.amount_paise), 0) AS expense_paise,
-      COALESCE(SUM(CASE WHEN substr(e.expense_date, 1, 7) = ? THEN e.amount_paise ELSE 0 END), 0) AS current_month_expense_paise,
-      COALESCE(SUM(CASE WHEN substr(e.expense_date, 1, 4) = ? THEN e.amount_paise ELSE 0 END), 0) AS current_year_expense_paise,
-      COALESCE(SUM(CASE WHEN e.expense_class = 'CAPEX' THEN e.amount_paise ELSE 0 END), 0) AS capex_paise,
-      COALESCE(SUM(CASE WHEN e.expense_class = 'OPEX' THEN e.amount_paise ELSE 0 END), 0) AS opex_paise,
+      CAST(COALESCE(SUM(e.amount_paise), 0) AS TEXT) AS expense_paise,
+      CAST(COALESCE(SUM(CASE WHEN substr(e.expense_date, 1, 7) = ? THEN e.amount_paise ELSE 0 END), 0) AS TEXT) AS current_month_expense_paise,
+      CAST(COALESCE(SUM(CASE WHEN substr(e.expense_date, 1, 4) = ? THEN e.amount_paise ELSE 0 END), 0) AS TEXT) AS current_year_expense_paise,
+      CAST(COALESCE(SUM(CASE WHEN e.expense_class = 'CAPEX' THEN e.amount_paise ELSE 0 END), 0) AS TEXT) AS capex_paise,
+      CAST(COALESCE(SUM(CASE WHEN e.expense_class = 'OPEX' THEN e.amount_paise ELSE 0 END), 0) AS TEXT) AS opex_paise,
       CAST((SELECT COALESCE(SUM(COALESCE(h.actual_revenue_paise, h.calculated_revenue_paise)), 0) FROM harvests h) AS TEXT) AS revenue_paise
     FROM expenses e WHERE e.deleted_at IS NULL`,
   ).bind(currentMonth, currentYear).first<TotalRow>();
-  const expensePaise = numberValue(row?.expense_paise);
+  const expensePaise = storedMoneyToNumber(row?.expense_paise);
   const revenuePaise = storedMoneyToNumber(row?.revenue_paise);
   return {
     expensePaise,
-    currentMonthExpensePaise: numberValue(row?.current_month_expense_paise),
-    currentYearExpensePaise: numberValue(row?.current_year_expense_paise),
-    capexPaise: numberValue(row?.capex_paise),
-    opexPaise: numberValue(row?.opex_paise),
+    currentMonthExpensePaise: storedMoneyToNumber(row?.current_month_expense_paise),
+    currentYearExpensePaise: storedMoneyToNumber(row?.current_year_expense_paise),
+    capexPaise: storedMoneyToNumber(row?.capex_paise),
+    opexPaise: storedMoneyToNumber(row?.opex_paise),
     revenuePaise,
     netCashFlowPaise: safeMoneyDifference(revenuePaise, expensePaise),
   };
@@ -91,24 +91,24 @@ export async function getDashboardTotals(db: D1Database, currentMonth: string, c
 export async function listMonthlyExpenses(db: D1Database): Promise<MonthlyExpense[]> {
   const rows = await db.prepare(
     `SELECT month, amount_paise FROM (
-       SELECT substr(expense_date, 1, 7) AS month, SUM(amount_paise) AS amount_paise
+       SELECT substr(expense_date, 1, 7) AS month, CAST(SUM(amount_paise) AS TEXT) AS amount_paise
        FROM expenses WHERE deleted_at IS NULL
        GROUP BY substr(expense_date, 1, 7) ORDER BY month DESC LIMIT 24
      ) ORDER BY month ASC`,
-  ).all<{ month: string; amount_paise: number }>();
-  return rows.results.map((row) => ({ month: row.month, amountPaise: row.amount_paise }));
+  ).all<{ month: string; amount_paise: string }>();
+  return rows.results.map((row) => ({ month: row.month, amountPaise: storedMoneyToNumber(row.amount_paise) }));
 }
 
 export async function listCategoryExpenses(db: D1Database): Promise<CategoryExpense[]> {
   const rows = await db.prepare(
     `SELECT e.category_id, COALESCE(c.name, 'Uncategorized') AS category_name,
-       SUM(e.amount_paise) AS amount_paise
+       CAST(SUM(e.amount_paise) AS TEXT) AS amount_paise
      FROM expenses e LEFT JOIN expense_categories c ON c.id = e.category_id
      WHERE e.deleted_at IS NULL
      GROUP BY e.category_id, c.name
-     ORDER BY amount_paise DESC, category_name ASC LIMIT 12`,
-  ).all<{ category_id: string | null; category_name: string; amount_paise: number }>();
-  return rows.results.map((row) => ({ categoryId: row.category_id, categoryName: row.category_name, amountPaise: row.amount_paise }));
+     ORDER BY SUM(e.amount_paise) DESC, category_name ASC LIMIT 12`,
+  ).all<{ category_id: string | null; category_name: string; amount_paise: string }>();
+  return rows.results.map((row) => ({ categoryId: row.category_id, categoryName: row.category_name, amountPaise: storedMoneyToNumber(row.amount_paise) }));
 }
 
 export async function listRecentExpenses(db: D1Database, limit = 8): Promise<RecentExpense[]> {
@@ -178,10 +178,10 @@ export async function getCashflowReport(db: D1Database, range: DateRange): Promi
   const expenseRange = rangeWhere("expense_date", range);
   const harvestRange = rangeWhere("harvest_date", range);
   const [expenses, harvests] = await Promise.all([
-    db.prepare(`SELECT COALESCE(SUM(amount_paise), 0) AS amount_paise FROM expenses WHERE deleted_at IS NULL${expenseRange.sql}`).bind(...expenseRange.params).first<{ amount_paise: number }>(),
+    db.prepare(`SELECT CAST(COALESCE(SUM(amount_paise), 0) AS TEXT) AS amount_paise FROM expenses WHERE deleted_at IS NULL${expenseRange.sql}`).bind(...expenseRange.params).first<{ amount_paise: string }>(),
     db.prepare(`SELECT CAST(COALESCE(SUM(COALESCE(actual_revenue_paise, calculated_revenue_paise)), 0) AS TEXT) AS amount_paise FROM harvests WHERE harvest_date IS NOT NULL${harvestRange.sql}`).bind(...harvestRange.params).first<{ amount_paise: string }>(),
   ]);
-  const expensePaise = numberValue(expenses?.amount_paise);
+  const expensePaise = storedMoneyToNumber(expenses?.amount_paise);
   const revenuePaise = storedMoneyToNumber(harvests?.amount_paise);
   return { expensePaise, revenuePaise, netCashFlowPaise: safeMoneyDifference(revenuePaise, expensePaise) };
 }

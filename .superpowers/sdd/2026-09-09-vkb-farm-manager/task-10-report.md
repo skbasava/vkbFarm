@@ -68,3 +68,28 @@ Completed on 2026-09-13 against Task 10 commit `cd66aad`:
 | `npm run lint` | PASS — zero warnings allowed |
 | `npm run build` | PASS — Worker and client production bundles built |
 | `git diff --check` | PASS |
+
+## Review round 2 fixes
+
+Completed on 2026-09-13 against review-fix commit `f3141f8`:
+
+- Dashboard expense total, current-month, current-year, CAPEX, and OPEX aggregates now cross the D1 boundary as exact decimal text and are range-checked before conversion. Cashflow expense totals use the same path. Monthly and category expense dashboard buckets were hardened consistently.
+- `safeMoneyDifference` independently validates both operands before constructing `BigInt` values, so two already-rounded unsafe numbers cannot cancel into a plausible but incorrect small net result.
+- Weighted sale price now uses stable `id` keyset pagination with a 100-row database bound and incremental BigInt numerator/weight accumulation. A 205-row regression proves exact accumulation and rounding across three reads.
+- Create, update, and delete hook tests keep active harvest-summary, dashboard, and filtered-reports observers mounted and prove that every successful harvest mutation refetches all three query families.
+
+### Review round 2 TDD evidence
+
+- RED: the focused unit run demonstrated that equal unsafe operands incorrectly returned zero from `safeMoneyDifference` before operand validation.
+- GREEN: `npm run test -- tests/unit/stored-integers.test.ts src/features/harvest/api.test.tsx` passed 2 files / 2 tests; the Worker overflow and multi-page regressions passed 2 files / 27 tests in their focused run.
+
+### Fresh final verification after round 2
+
+| Check | Result |
+| --- | --- |
+| `npm run test -- tests/unit src` | PASS — 20 files, 74 tests |
+| `npm run test:worker` | PASS — 8 files, 64 tests |
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS — zero warnings allowed |
+| `npm run build` | PASS — Worker and client production bundles built |
+| `git diff --check` | PASS |

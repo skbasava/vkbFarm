@@ -99,7 +99,7 @@ async function invalidateHarvestDependents(client: ReturnType<typeof useQueryCli
   await Promise.all([
     client.invalidateQueries({ queryKey: keys.all }),
     client.invalidateQueries({ queryKey: queryKeys.dashboard }),
-    client.invalidateQueries({ queryKey: ["reports"] }),
+    client.invalidateQueries({ queryKey: queryKeys.reports() }),
   ]);
 }
 

@@ -101,14 +101,32 @@ function scaledThousandths(value: string): bigint {
   return BigInt(match[1]) * 1_000n + BigInt(match[2]);
 }
 
-function weightedAverage(rows: Array<{ sale_price_paise_per_kg: string | number; net_weight_kg: string }>): number {
+const WEIGHT_PAGE_SIZE = 100;
+type SqlFilter = ReturnType<typeof where>;
+type WeightRow = { id: string; sale_price_paise_per_kg: string | number; net_weight_kg: string };
+
+async function weightedAverage(db: D1Database, filter: SqlFilter): Promise<number> {
   let weightedPaise = 0n;
   let weight = 0n;
-  for (const row of rows) {
-    const price = storedMoneyToNumber(row.sale_price_paise_per_kg);
-    const scaledWeight = scaledThousandths(row.net_weight_kg);
-    weightedPaise += BigInt(price) * scaledWeight;
-    weight += scaledWeight;
+  let afterId: string | null = null;
+  const weightWhere = filter.sql
+    ? `${filter.sql} AND h.net_weight_kg IS NOT NULL AND h.sale_price_paise_per_kg IS NOT NULL`
+    : "WHERE h.net_weight_kg IS NOT NULL AND h.sale_price_paise_per_kg IS NOT NULL";
+
+  while (true) {
+    const page: D1Result<WeightRow> = await db.prepare(`SELECT h.id,
+      CAST(h.sale_price_paise_per_kg AS TEXT) AS sale_price_paise_per_kg,
+      printf('%.3f', h.net_weight_kg) AS net_weight_kg
+      FROM harvests h ${weightWhere}${afterId === null ? "" : " AND h.id > ?"}
+      ORDER BY h.id ASC LIMIT ?`).bind(...filter.params, ...(afterId === null ? [] : [afterId]), WEIGHT_PAGE_SIZE).all<WeightRow>();
+    for (const row of page.results) {
+      const price = storedMoneyToNumber(row.sale_price_paise_per_kg);
+      const scaledWeight = scaledThousandths(row.net_weight_kg);
+      weightedPaise += BigInt(price) * scaledWeight;
+      weight += scaledWeight;
+    }
+    if (page.results.length < WEIGHT_PAGE_SIZE) break;
+    afterId = page.results.at(-1)!.id;
   }
   if (weight === 0n) return 0;
   return exactMoneyToNumber((weightedPaise + weight / 2n) / weight);
@@ -169,7 +187,6 @@ export async function getHarvest(db: D1Database, id: string): Promise<Harvest | 
 export async function harvestSummary(db: D1Database, filters: Omit<HarvestFilters, "page" | "pageSize">) {
   const filter = where(filters);
   const datedWhere = filter.sql ? `${filter.sql} AND h.harvest_date IS NOT NULL` : "WHERE h.harvest_date IS NOT NULL";
-  const weightedWhere = filter.sql ? `${filter.sql} AND h.net_weight_kg IS NOT NULL AND h.sale_price_paise_per_kg IS NOT NULL` : "WHERE h.net_weight_kg IS NOT NULL AND h.sale_price_paise_per_kg IS NOT NULL";
   const [summary, charts, weights] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS record_count,
       printf('%.3f', COALESCE(SUM(quantity), 0)) AS total_quantity,
@@ -190,11 +207,7 @@ export async function harvestSummary(db: D1Database, filters: Omit<HarvestFilter
       ORDER BY month ASC, c.name COLLATE NOCASE ASC, c.id ASC`).bind(...filter.params).all<{
         month: string; crop_name: string; revenue_paise: string; quantity: string; net_weight_kg: string;
       }>(),
-    db.prepare(`SELECT CAST(h.sale_price_paise_per_kg AS TEXT) AS sale_price_paise_per_kg,
-      printf('%.3f', h.net_weight_kg) AS net_weight_kg
-      FROM harvests h ${weightedWhere}`).bind(...filter.params).all<{
-        sale_price_paise_per_kg: string; net_weight_kg: string;
-      }>(),
+    weightedAverage(db, filter),
   ]);
   const row = summary ?? { record_count: 0, total_quantity: "0.000", total_net_weight_kg: "0.000", revenue_paise: "0", undated_count: 0, undated_revenue_paise: "0" };
   return {
@@ -202,7 +215,7 @@ export async function harvestSummary(db: D1Database, filters: Omit<HarvestFilter
     totalQuantity: decimalString(row.total_quantity) ?? "0",
     totalNetWeightKg: decimalString(row.total_net_weight_kg) ?? "0",
     revenuePaise: storedMoneyToNumber(row.revenue_paise),
-    averagePricePaisePerKg: weightedAverage(weights.results),
+    averagePricePaisePerKg: weights,
     undatedCount: row.undated_count,
     undatedRevenuePaise: storedMoneyToNumber(row.undated_revenue_paise),
     monthlyCropRevenue: charts.results.map((chart) => ({

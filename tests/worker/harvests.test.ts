@@ -288,6 +288,22 @@ describe("harvest API", () => {
     });
   });
 
+  it("accumulates an exact weighted average across bounded database pages", async () => {
+    const banana = await crop();
+    const rows = Array.from({ length: 205 }, (_, index) => {
+      const price = index < 100 ? 100 : 200;
+      return env.DB.prepare("INSERT INTO harvests (id, crop_id, harvest_date, net_weight_kg, sale_price_paise_per_kg, calculated_revenue_paise, actual_revenue_paise) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(`weighted_${String(index).padStart(3, "0")}`, banana.id, "2026-08-01", 0.001, price, 0, 0);
+    });
+    await env.DB.batch(rows);
+
+    const response = await request("/summary");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { recordCount: 205, totalNetWeightKg: "0.205", averagePricePaisePerKg: 151 },
+    });
+  });
+
   it("allows editors and admins to write but rejects viewers", async () => {
     const banana = await crop();
     await env.DB.batch([

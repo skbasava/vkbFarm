@@ -150,6 +150,41 @@ describe("dashboard and reports API", () => {
     }
   });
 
+  it("rejects unsafe expense totals before dashboard or cashflow arithmetic can round them", async () => {
+    const exactUnsafeTotalParts = [4_503_599_627_370_496, 4_503_599_627_370_497];
+    await env.DB.batch(exactUnsafeTotalParts.map((amount, index) => env.DB.prepare(
+      `INSERT INTO expenses (
+        id, expense_date, description, amount_paise, paid_by_person_id, expense_class, is_shared
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(`unsafe_expense_${index}`, "2026-09-05", `Unsafe ${index}`, amount, "person_satish", index === 0 ? "CAPEX" : "OPEX", 0)));
+
+    for (const path of ["/dashboard", "/reports/cashflow"]) {
+      const response = await request(path);
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: { code: "DATA_RANGE_ERROR", message: "Stored money exceeds the supported range" },
+      });
+    }
+  });
+
+  it("rejects near-equal unsafe revenue and expense totals instead of returning a rounded small net", async () => {
+    await env.DB.prepare("INSERT INTO crops (id, name) VALUES (?, ?)").bind("crop_difference", "Difference crop").run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO expenses (id, expense_date, description, amount_paise, paid_by_person_id, is_shared) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind("difference_expense_one", "2026-09-05", "Difference 1", 4_503_599_627_370_496, "person_satish", 0),
+      env.DB.prepare("INSERT INTO expenses (id, expense_date, description, amount_paise, paid_by_person_id, is_shared) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind("difference_expense_two", "2026-09-05", "Difference 2", 4_503_599_627_370_497, "person_satish", 0),
+      env.DB.prepare("INSERT INTO harvests (id, crop_id, harvest_date, actual_revenue_paise, calculated_revenue_paise) VALUES (?, ?, ?, ?, ?)")
+        .bind("difference_revenue_one", "crop_difference", "2026-09-05", 4_503_599_627_370_496, 4_503_599_627_370_496),
+      env.DB.prepare("INSERT INTO harvests (id, crop_id, harvest_date, actual_revenue_paise, calculated_revenue_paise) VALUES (?, ?, ?, ?, ?)")
+        .bind("difference_revenue_two", "crop_difference", "2026-09-05", 4_503_599_627_370_496, 4_503_599_627_370_496),
+    ]);
+
+    const response = await request("/reports/cashflow");
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "DATA_RANGE_ERROR" } });
+  });
+
   it("calculates date-filtered contribution reports through the settlement service", async () => {
     await seedFixture();
     await env.DB.prepare(
