@@ -9,9 +9,13 @@ import {
 } from "../repositories/harvest-repository";
 import { getCrop } from "../repositories/plantation-repository";
 import { createId } from "../utils/ids";
-import { isIsoLocalDate } from "../utils/dates";
 import { rupeesToPaise } from "../utils/money";
-import type { HarvestInput, HarvestUpdateInput } from "../validation/harvests";
+import {
+  ImportedHarvestInputSchema,
+  type HarvestInput,
+  type HarvestUpdateInput,
+  type ImportedHarvestInput,
+} from "../validation/harvests";
 
 const DECIMAL_PATTERN = /^(0|[1-9]\d*)(?:\.(\d{1,3}))?$/;
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
@@ -19,21 +23,7 @@ const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 type RevenueInput = { netWeightKg: string; salePricePaisePerKg: number };
 type RevenueOverride = { calculated: number; actual: number; reason?: string | null };
 
-export type ImportedHarvestInput = {
-  cropId: string;
-  harvestDate: string | null;
-  quantity?: string | null;
-  grossWeightKg?: string | null;
-  netWeightKg: string;
-  averageWeightKg?: string | null;
-  salePricePerKg: string;
-  actualRevenuePaise: number;
-  buyer?: string | null;
-  notes?: string | null;
-  sourceSheet: string;
-  sourceRow: number;
-  importFingerprint: string;
-};
+export type { ImportedHarvestInput };
 
 function scaledThousandths(value: string): bigint {
   const match = DECIMAL_PATTERN.exec(value);
@@ -176,7 +166,8 @@ function mergedWrite(current: Harvest, input: HarvestUpdateInput): HarvestWrite 
   const netWeightKg = input.netWeightKg ?? current.netWeightKg ?? "0";
   const salePricePerKg = input.salePricePerKg ?? rupeesStringFromPaise(current.salePricePaisePerKg ?? 0);
   const revenue = calculatedRevenue(netWeightKg, salePricePerKg);
-  const basisChanged = revenue.calculatedRevenuePaise !== (current.calculatedRevenuePaise ?? 0);
+  const basisChanged = scaledThousandths(netWeightKg) !== scaledThousandths(current.netWeightKg ?? "0")
+    || revenue.salePricePaisePerKg !== (current.salePricePaisePerKg ?? 0);
   const currentActual = current.actualRevenuePaise ?? current.calculatedRevenuePaise ?? revenue.calculatedRevenuePaise;
   const currentReason = optionalText(current.revenueOverrideReason);
 
@@ -274,32 +265,33 @@ export async function createImportedHarvest(
   input: ImportedHarvestInput,
   actor: string,
 ): Promise<Harvest> {
-  if (input.harvestDate !== null && !isIsoLocalDate(input.harvestDate)) {
-    throw new ApiHttpError(422, "VALIDATION_ERROR", "Harvest date must be a valid ISO local date");
+  const parsed = ImportedHarvestInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new ApiHttpError(422, "VALIDATION_ERROR", "The imported harvest input is invalid", {
+      issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
+    });
   }
-  if (!Number.isSafeInteger(input.actualRevenuePaise) || input.actualRevenuePaise < 0) {
-    throw new ApiHttpError(422, "VALIDATION_ERROR", "Actual revenue must be a non-negative safe integer paise value");
-  }
-  await validateCrop(db, input.cropId);
+  const value = parsed.data;
+  await validateCrop(db, value.cropId);
   const now = new Date().toISOString();
-  const revenue = calculatedRevenue(input.netWeightKg, input.salePricePerKg);
+  const revenue = calculatedRevenue(value.netWeightKg, value.salePricePerKg);
   const write: HarvestWrite = {
     id: createId(),
-    cropId: input.cropId,
-    harvestDate: input.harvestDate,
-    quantity: decimalNumber(input.quantity),
-    grossWeightKg: decimalNumber(input.grossWeightKg),
-    netWeightKg: decimalNumber(input.netWeightKg),
-    averageWeightKg: decimalNumber(input.averageWeightKg),
+    cropId: value.cropId,
+    harvestDate: value.harvestDate,
+    quantity: decimalNumber(value.quantity),
+    grossWeightKg: decimalNumber(value.grossWeightKg),
+    netWeightKg: decimalNumber(value.netWeightKg),
+    averageWeightKg: decimalNumber(value.averageWeightKg),
     ...revenue,
-    actualRevenuePaise: input.actualRevenuePaise,
+    actualRevenuePaise: value.actualRevenuePaise,
     revenueOverrideReason: null,
-    buyer: optionalText(input.buyer),
-    notes: optionalText(input.notes),
+    buyer: optionalText(value.buyer),
+    notes: optionalText(value.notes),
     source: "EXCEL",
-    sourceSheet: input.sourceSheet,
-    sourceRow: input.sourceRow,
-    importFingerprint: input.importFingerprint,
+    sourceSheet: value.sourceSheet,
+    sourceRow: value.sourceRow,
+    importFingerprint: value.importFingerprint,
     updatedAt: now,
   };
   await db.batch([

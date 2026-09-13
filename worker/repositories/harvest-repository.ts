@@ -1,3 +1,5 @@
+import { exactMoneyToNumber, storedMoneyToNumber } from "../utils/stored-integers";
+
 export type Harvest = {
   id: string;
   cropId: string;
@@ -93,6 +95,25 @@ function decimalString(value: string | null): string | null {
   return value.replace(/(?:\.0+|(\.\d*?)0+)$/, "$1");
 }
 
+function scaledThousandths(value: string): bigint {
+  const match = /^(0|[1-9]\d*)\.(\d{3})$/.exec(value);
+  if (!match) throw new TypeError("Stored weight is not a canonical three-decimal value");
+  return BigInt(match[1]) * 1_000n + BigInt(match[2]);
+}
+
+function weightedAverage(rows: Array<{ sale_price_paise_per_kg: string | number; net_weight_kg: string }>): number {
+  let weightedPaise = 0n;
+  let weight = 0n;
+  for (const row of rows) {
+    const price = storedMoneyToNumber(row.sale_price_paise_per_kg);
+    const scaledWeight = scaledThousandths(row.net_weight_kg);
+    weightedPaise += BigInt(price) * scaledWeight;
+    weight += scaledWeight;
+  }
+  if (weight === 0n) return 0;
+  return exactMoneyToNumber((weightedPaise + weight / 2n) / weight);
+}
+
 function map(row: HarvestRow): Harvest {
   return {
     id: row.id,
@@ -148,42 +169,46 @@ export async function getHarvest(db: D1Database, id: string): Promise<Harvest | 
 export async function harvestSummary(db: D1Database, filters: Omit<HarvestFilters, "page" | "pageSize">) {
   const filter = where(filters);
   const datedWhere = filter.sql ? `${filter.sql} AND h.harvest_date IS NOT NULL` : "WHERE h.harvest_date IS NOT NULL";
-  const [summary, charts] = await Promise.all([
+  const weightedWhere = filter.sql ? `${filter.sql} AND h.net_weight_kg IS NOT NULL AND h.sale_price_paise_per_kg IS NOT NULL` : "WHERE h.net_weight_kg IS NOT NULL AND h.sale_price_paise_per_kg IS NOT NULL";
+  const [summary, charts, weights] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS record_count,
       printf('%.3f', COALESCE(SUM(quantity), 0)) AS total_quantity,
       printf('%.3f', COALESCE(SUM(net_weight_kg), 0)) AS total_net_weight_kg,
-      COALESCE(SUM(COALESCE(actual_revenue_paise, calculated_revenue_paise)), 0) AS revenue_paise,
+      CAST(COALESCE(SUM(COALESCE(actual_revenue_paise, calculated_revenue_paise)), 0) AS TEXT) AS revenue_paise,
       COALESCE(SUM(CASE WHEN harvest_date IS NULL THEN 1 ELSE 0 END), 0) AS undated_count,
-      COALESCE(SUM(CASE WHEN harvest_date IS NULL THEN COALESCE(actual_revenue_paise, calculated_revenue_paise) ELSE 0 END), 0) AS undated_revenue_paise,
-      COALESCE(SUM(sale_price_paise_per_kg * net_weight_kg), 0) AS weighted_price,
-      COALESCE(SUM(net_weight_kg), 0) AS weighted_weight
+      CAST(COALESCE(SUM(CASE WHEN harvest_date IS NULL THEN COALESCE(actual_revenue_paise, calculated_revenue_paise) ELSE 0 END), 0) AS TEXT) AS undated_revenue_paise
       FROM harvests h ${filter.sql}`).bind(...filter.params).first<{
-        record_count: number; total_quantity: string; total_net_weight_kg: string; revenue_paise: number;
-        undated_count: number; undated_revenue_paise: number; weighted_price: number; weighted_weight: number;
+        record_count: number; total_quantity: string; total_net_weight_kg: string; revenue_paise: string;
+        undated_count: number; undated_revenue_paise: string;
       }>(),
     db.prepare(`SELECT substr(h.harvest_date, 1, 7) AS month, c.name AS crop_name,
-      COALESCE(SUM(COALESCE(actual_revenue_paise, calculated_revenue_paise)), 0) AS revenue_paise,
+      CAST(COALESCE(SUM(COALESCE(actual_revenue_paise, calculated_revenue_paise)), 0) AS TEXT) AS revenue_paise,
       printf('%.3f', COALESCE(SUM(quantity), 0)) AS quantity,
       printf('%.3f', COALESCE(SUM(net_weight_kg), 0)) AS net_weight_kg
       FROM harvests h JOIN crops c ON c.id = h.crop_id ${datedWhere}
       GROUP BY substr(h.harvest_date, 1, 7), c.id, c.name
       ORDER BY month ASC, c.name COLLATE NOCASE ASC, c.id ASC`).bind(...filter.params).all<{
-        month: string; crop_name: string; revenue_paise: number; quantity: string; net_weight_kg: string;
+        month: string; crop_name: string; revenue_paise: string; quantity: string; net_weight_kg: string;
+      }>(),
+    db.prepare(`SELECT CAST(h.sale_price_paise_per_kg AS TEXT) AS sale_price_paise_per_kg,
+      printf('%.3f', h.net_weight_kg) AS net_weight_kg
+      FROM harvests h ${weightedWhere}`).bind(...filter.params).all<{
+        sale_price_paise_per_kg: string; net_weight_kg: string;
       }>(),
   ]);
-  const row = summary ?? { record_count: 0, total_quantity: "0.000", total_net_weight_kg: "0.000", revenue_paise: 0, undated_count: 0, undated_revenue_paise: 0, weighted_price: 0, weighted_weight: 0 };
+  const row = summary ?? { record_count: 0, total_quantity: "0.000", total_net_weight_kg: "0.000", revenue_paise: "0", undated_count: 0, undated_revenue_paise: "0" };
   return {
     recordCount: row.record_count,
     totalQuantity: decimalString(row.total_quantity) ?? "0",
     totalNetWeightKg: decimalString(row.total_net_weight_kg) ?? "0",
-    revenuePaise: row.revenue_paise,
-    averagePricePaisePerKg: row.weighted_weight > 0 ? Math.round(row.weighted_price / row.weighted_weight) : 0,
+    revenuePaise: storedMoneyToNumber(row.revenue_paise),
+    averagePricePaisePerKg: weightedAverage(weights.results),
     undatedCount: row.undated_count,
-    undatedRevenuePaise: row.undated_revenue_paise,
+    undatedRevenuePaise: storedMoneyToNumber(row.undated_revenue_paise),
     monthlyCropRevenue: charts.results.map((chart) => ({
       month: chart.month,
       cropName: chart.crop_name,
-      revenuePaise: chart.revenue_paise,
+      revenuePaise: storedMoneyToNumber(chart.revenue_paise),
       quantity: decimalString(chart.quantity) ?? "0",
       netWeightKg: decimalString(chart.net_weight_kg) ?? "0",
     })),

@@ -16,7 +16,10 @@ const summary = {
   averagePricePaisePerKg: 4500,
   undatedCount: 1,
   undatedRevenuePaise: 10085,
-  monthlyCropRevenue: [{ month: "2026-08", cropName: "Banana", revenuePaise: 678415, quantity: "11", netWeightKg: "150" }],
+  monthlyCropRevenue: [
+    { month: "2026-08", cropName: "Banana", revenuePaise: 678415, quantity: "11", netWeightKg: "150" },
+    { month: "2026-09", cropName: "Mango", revenuePaise: 10085, quantity: "1.25", netWeightKg: "3" },
+  ],
 };
 const legacyHarvest = {
   id: "legacy",
@@ -63,8 +66,13 @@ describe("HarvestPage", () => {
     expect(screen.getByText("₹6,885")).toBeVisible();
     expect(screen.getByText(/1 imported record has no harvest date/i)).toBeVisible();
     expect(screen.getByText("Date unavailable · imported from Excel")).toBeVisible();
-    expect(screen.getByRole("img", { name: /monthly crop revenue/i })).toBeVisible();
-    expect(screen.getByRole("img", { name: /harvest quantity over time/i })).toBeVisible();
+    const revenueValues = screen.getByRole("list", { name: /monthly crop revenue values/i });
+    expect(revenueValues).toHaveTextContent("Aug '26 · Banana: ₹6,784.15");
+    expect(revenueValues).toHaveTextContent("Sept '26 · Mango: ₹100.85");
+    const quantityValues = screen.getByRole("list", { name: /harvest quantity over time values/i });
+    expect(quantityValues).toHaveTextContent("Aug '26 · Banana: 11");
+    expect(quantityValues).toHaveTextContent("Sept '26 · Mango: 1.25");
+    expect([...document.querySelectorAll(".harvest-chart svg")].every((svg) => svg.closest('[aria-hidden="true"]'))).toBe(true);
 
     await user.selectOptions(await screen.findByLabelText("Filter crop"), "banana");
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining("cropId=banana"), undefined));
@@ -82,6 +90,47 @@ describe("HarvestPage", () => {
       expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({ quantity: "12.25", netWeightKg: "10.125", salePricePerKg: "7.99" });
       expect(JSON.parse(String(createCall?.[1]?.body))).not.toHaveProperty("source");
     });
+    await waitFor(() => expect(fetchSpy.mock.calls.filter(([url]) => String(url).startsWith("/api/v1/harvests/summary")).length).toBeGreaterThan(2));
+  });
+
+  it("shows a loading skeleton while harvest queries are pending", () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => undefined));
+    renderPage();
+    expect(screen.getByLabelText("Loading harvest reporting")).toBeVisible();
+  });
+
+  it("shows the empty ledger state when filters return no records", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      const path = String(url);
+      if (path === "/api/v1/identity") return Promise.resolve(new Response(JSON.stringify({ data: { email: "viewer@vkb.test", role: "viewer" } })));
+      if (path.startsWith("/api/v1/harvests/summary")) return Promise.resolve(new Response(JSON.stringify({ data: { ...summary, recordCount: 0, monthlyCropRevenue: [] } })));
+      if (path === "/api/v1/harvests") return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      if (path.startsWith("/api/v1/plantation/crops")) return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "No harvest records found" })).toBeVisible();
+  });
+
+  it("recovers from a load error when the user retries", async () => {
+    let failing = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      const path = String(url);
+      if (path === "/api/v1/identity") return Promise.resolve(new Response(JSON.stringify({ data: { email: "viewer@vkb.test", role: "viewer" } })));
+      if (path.startsWith("/api/v1/plantation/crops")) return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      if (path.startsWith("/api/v1/harvests")) {
+        if (failing) return Promise.resolve(new Response(JSON.stringify({ error: { code: "UNAVAILABLE", message: "Try later" } }), { status: 503 }));
+        if (path.startsWith("/api/v1/harvests/summary")) return Promise.resolve(new Response(JSON.stringify({ data: summary })));
+        return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not load harvest records/i);
+    failing = false;
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    expect(await screen.findByRole("heading", { name: "Harvest" })).toBeVisible();
   });
 
   it("keeps the reporting view available while hiding write controls from a viewer", async () => {
@@ -111,5 +160,37 @@ describe("HarvestPage", () => {
     await user.click(await screen.findByRole("button", { name: /edit archive banana harvest historical/i }));
     expect(await screen.findByRole("option", { name: "Archive banana (inactive)" })).toBeVisible();
     expect(within(screen.getByRole("dialog", { name: /edit harvest/i })).getByLabelText("Crop")).toHaveValue("archived-banana");
+  });
+
+  it("renders thousandth-kilogram values without rounding them to zero", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      const path = String(url);
+      if (path === "/api/v1/identity") return Promise.resolve(new Response(JSON.stringify({ data: { email: "viewer@vkb.test", role: "viewer" } })));
+      if (path.startsWith("/api/v1/harvests/summary")) return Promise.resolve(new Response(JSON.stringify({ data: { ...summary, totalNetWeightKg: "0.001" } })));
+      if (path === "/api/v1/harvests") return Promise.resolve(new Response(JSON.stringify({ data: [{ ...legacyHarvest, netWeightKg: "0.001" }] })));
+      if (path.startsWith("/api/v1/plantation/crops")) return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+    renderPage();
+    expect((await screen.findAllByText("0.001 kg")).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps the confirmation dialog open and shows a retryable message when deletion fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((url, init) => {
+      const path = String(url);
+      if (path === "/api/v1/identity") return Promise.resolve(new Response(JSON.stringify({ data: { email: "editor@vkb.test", role: "editor" } })));
+      if (path.startsWith("/api/v1/harvests/summary")) return Promise.resolve(new Response(JSON.stringify({ data: summary })));
+      if (path === "/api/v1/harvests") return Promise.resolve(new Response(JSON.stringify({ data: [legacyHarvest] })));
+      if (path === "/api/v1/harvests/legacy" && init?.method === "DELETE") return Promise.resolve(new Response(JSON.stringify({ error: { code: "STORAGE_ERROR", message: "No" } }), { status: 500 }));
+      if (path.startsWith("/api/v1/plantation/crops")) return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: /delete banana harvest legacy/i }));
+    const dialog = screen.getByRole("dialog", { name: /delete harvest record/i });
+    await user.click(within(dialog).getByRole("button", { name: /^delete harvest$/i }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/could not be deleted/i);
+    expect(dialog).toBeVisible();
   });
 });

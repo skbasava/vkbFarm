@@ -9,4 +9,5 @@ it("uses Indian currency grouping", () => {
 it("formats local calendar dates and weights for the farm UI", () => {
   expect(formatDate("2026-09-09")).toBe("09 Sept 2026");
   expect(formatWeight(12.5)).toBe("12.5 kg");
+  expect(formatWeight(0.001)).toBe("0.001 kg");
 });

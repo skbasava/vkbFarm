@@ -16,7 +16,7 @@ const dateFormatter = new Intl.DateTimeFormat(INR_LOCALE, {
 });
 
 const weightFormatter = new Intl.NumberFormat(INR_LOCALE, {
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 3,
 });
 
 /** Formats an integer paise value as Indian rupees. */

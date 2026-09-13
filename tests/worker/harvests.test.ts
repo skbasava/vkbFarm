@@ -124,8 +124,55 @@ describe("harvest API", () => {
 
     const changedBasis = await request(`/${imported.id}`, { method: "PATCH", headers: jsonHeaders, body: JSON.stringify({ netWeightKg: "3" }) });
     expect(changedBasis.status).toBe(422);
+
+    const sameTotalDifferentBasis = await request(`/${imported.id}`, {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify({ netWeightKg: "5", salePricePerKg: "20" }),
+    });
+    expect(sameTotalDifferentBasis.status).toBe(422);
+    await expect(sameTotalDifferentBasis.json()).resolves.toMatchObject({
+      error: { code: "LEGACY_REVENUE_REVIEW_REQUIRED" },
+    });
     const unchanged = await request(`/${imported.id}`);
     await expect(unchanged.json()).resolves.toMatchObject({ data: { netWeightKg: "2.5", calculatedRevenuePaise: 10000, actualRevenuePaise: 10085 } });
+  });
+
+  it("validates every trusted import value at runtime with sanitized errors", async () => {
+    const banana = await crop();
+    const valid = {
+      cropId: banana.id,
+      harvestDate: "2026-08-01",
+      netWeightKg: "1.125",
+      salePricePerKg: "40",
+      actualRevenuePaise: 4_500,
+      sourceSheet: "Banana Harvest Details",
+      sourceRow: 2,
+      importFingerprint: "legacy-fingerprint",
+    };
+    const invalidInputs = [
+      { ...valid, harvestDate: "2026-02-30" },
+      { ...valid, netWeightKg: "1.0001" },
+      { ...valid, quantity: "not-a-decimal" },
+      { ...valid, salePricePerKg: "1.001" },
+      { ...valid, actualRevenuePaise: Number.MAX_SAFE_INTEGER + 1 },
+      { ...valid, sourceSheet: "   " },
+      { ...valid, sourceSheet: "s".repeat(251) },
+      { ...valid, sourceRow: 0 },
+      { ...valid, sourceRow: Number.MAX_SAFE_INTEGER + 1 },
+      { ...valid, importFingerprint: "" },
+      { ...valid, importFingerprint: "f".repeat(513) },
+    ];
+
+    for (const input of invalidInputs) {
+      await expect(createImportedHarvest(env.DB, input as never, "import@vkb.local")).rejects.toMatchObject({
+        status: 422,
+        code: "VALIDATION_ERROR",
+        message: "The imported harvest input is invalid",
+      });
+    }
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM harvests").first<{ count: number }>();
+    expect(count?.count).toBe(0);
   });
 
   it("filters with bound crop and local date values, retaining undated EXCEL legacy rows in all-time totals", async () => {
@@ -163,6 +210,10 @@ describe("harvest API", () => {
     expect((await request("?month=2026-13")).status).toBe(422);
     expect((await request("?year=26")).status).toBe(422);
     expect((await request("?dateFrom=2026-09-02&dateTo=2026-09-01")).status).toBe(422);
+    expect((await request("?page=1000000&pageSize=100")).status).toBe(200);
+    const beyondMaximumPage = await request("?page=1000001&pageSize=100");
+    expect(beyondMaximumPage.status).toBe(422);
+    await expect(beyondMaximumPage.json()).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR" } });
   });
 
   it("updates and deletes records with an audit trail while preserving imported unavailable dates", async () => {
@@ -211,6 +262,30 @@ describe("harvest API", () => {
     await createHarvest({ quantity: "0", netWeightKg: "0", salePricePerKg: "45" }, banana.id);
     const zero = await request("/summary");
     await expect(zero.json()).resolves.toMatchObject({ data: { totalNetWeightKg: "0", averagePricePaisePerKg: 0 } });
+  });
+
+  it("calculates fractional-weight averages with scaled integers and rejects unsafe money totals", async () => {
+    const banana = await crop();
+    await createHarvest({ quantity: "1", netWeightKg: "0.001", salePricePerKg: "1" }, banana.id);
+    await createHarvest({ quantity: "1", netWeightKg: "0.002", salePricePerKg: "2" }, banana.id);
+
+    const exactAverage = await request("/summary");
+    await expect(exactAverage.json()).resolves.toMatchObject({
+      data: { totalNetWeightKg: "0.003", averagePricePaisePerKg: 167 },
+    });
+
+    await env.DB.prepare("DELETE FROM harvests").run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO harvests (id, crop_id, harvest_date, net_weight_kg, sale_price_paise_per_kg, calculated_revenue_paise, actual_revenue_paise) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind("overflow_one", banana.id, "2026-08-01", 1, 1, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER),
+      env.DB.prepare("INSERT INTO harvests (id, crop_id, harvest_date, net_weight_kg, sale_price_paise_per_kg, calculated_revenue_paise, actual_revenue_paise) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind("overflow_two", banana.id, "2026-08-02", 1, 1, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER),
+    ]);
+    const overflow = await request("/summary");
+    expect(overflow.status).toBe(500);
+    await expect(overflow.json()).resolves.toEqual({
+      error: { code: "DATA_RANGE_ERROR", message: "Stored money exceeds the supported range" },
+    });
   });
 
   it("allows editors and admins to write but rejects viewers", async () => {

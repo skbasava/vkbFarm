@@ -1,3 +1,5 @@
+import { safeMoneyDifference, storedMoneyToNumber } from "../utils/stored-integers";
+
 export type DateRange = { dateFrom?: string; dateTo?: string };
 
 export type DashboardTotals = {
@@ -41,7 +43,7 @@ type TotalRow = {
   current_year_expense_paise: number;
   capex_paise: number;
   opex_paise: number;
-  revenue_paise: number;
+  revenue_paise: string;
 };
 
 function numberValue(value: number | null | undefined): number {
@@ -70,11 +72,11 @@ export async function getDashboardTotals(db: D1Database, currentMonth: string, c
       COALESCE(SUM(CASE WHEN substr(e.expense_date, 1, 4) = ? THEN e.amount_paise ELSE 0 END), 0) AS current_year_expense_paise,
       COALESCE(SUM(CASE WHEN e.expense_class = 'CAPEX' THEN e.amount_paise ELSE 0 END), 0) AS capex_paise,
       COALESCE(SUM(CASE WHEN e.expense_class = 'OPEX' THEN e.amount_paise ELSE 0 END), 0) AS opex_paise,
-      (SELECT COALESCE(SUM(COALESCE(h.actual_revenue_paise, h.calculated_revenue_paise)), 0) FROM harvests h) AS revenue_paise
+      CAST((SELECT COALESCE(SUM(COALESCE(h.actual_revenue_paise, h.calculated_revenue_paise)), 0) FROM harvests h) AS TEXT) AS revenue_paise
     FROM expenses e WHERE e.deleted_at IS NULL`,
   ).bind(currentMonth, currentYear).first<TotalRow>();
   const expensePaise = numberValue(row?.expense_paise);
-  const revenuePaise = numberValue(row?.revenue_paise);
+  const revenuePaise = storedMoneyToNumber(row?.revenue_paise);
   return {
     expensePaise,
     currentMonthExpensePaise: numberValue(row?.current_month_expense_paise),
@@ -82,7 +84,7 @@ export async function getDashboardTotals(db: D1Database, currentMonth: string, c
     capexPaise: numberValue(row?.capex_paise),
     opexPaise: numberValue(row?.opex_paise),
     revenuePaise,
-    netCashFlowPaise: revenuePaise - expensePaise,
+    netCashFlowPaise: safeMoneyDifference(revenuePaise, expensePaise),
   };
 }
 
@@ -127,11 +129,11 @@ export async function listRecentExpenses(db: D1Database, limit = 8): Promise<Rec
 export async function listRecentHarvests(db: D1Database, limit = 8): Promise<RecentHarvest[]> {
   const rows = await db.prepare(
     `SELECT h.id, c.name AS crop_name, h.harvest_date, h.quantity,
-       COALESCE(h.actual_revenue_paise, h.calculated_revenue_paise, 0) AS revenue_paise, h.buyer
+       CAST(COALESCE(h.actual_revenue_paise, h.calculated_revenue_paise, 0) AS TEXT) AS revenue_paise, h.buyer
      FROM harvests h JOIN crops c ON c.id = h.crop_id
      ORDER BY h.harvest_date IS NULL ASC, h.harvest_date DESC, h.created_at DESC, h.id DESC LIMIT ?`,
-  ).bind(limit).all<{ id: string; crop_name: string; harvest_date: string | null; quantity: number | null; revenue_paise: number; buyer: string | null }>();
-  return rows.results.map((row) => ({ id: row.id, cropName: row.crop_name, harvestDate: row.harvest_date, quantity: row.quantity, revenuePaise: row.revenue_paise, buyer: row.buyer }));
+  ).bind(limit).all<{ id: string; crop_name: string; harvest_date: string | null; quantity: number | null; revenue_paise: string; buyer: string | null }>();
+  return rows.results.map((row) => ({ id: row.id, cropName: row.crop_name, harvestDate: row.harvest_date, quantity: row.quantity, revenuePaise: storedMoneyToNumber(row.revenue_paise), buyer: row.buyer }));
 }
 
 export async function getPlantationSummary(db: D1Database): Promise<PlantationSummary> {
@@ -162,14 +164,14 @@ export async function listHarvestReport(db: D1Database, range: DateRange): Promi
   const where = rangeWhere("h.harvest_date", range);
   const rows = await db.prepare(
     `SELECT h.id, c.name AS crop_name, h.harvest_date, h.quantity,
-       COALESCE(h.actual_revenue_paise, h.calculated_revenue_paise, 0) AS revenue_paise, h.buyer, h.notes
+       CAST(COALESCE(h.actual_revenue_paise, h.calculated_revenue_paise, 0) AS TEXT) AS revenue_paise, h.buyer, h.notes
      FROM harvests h JOIN crops c ON c.id = h.crop_id
      WHERE 1 = 1${where.sql}
      ORDER BY h.harvest_date IS NULL ASC, h.harvest_date DESC, h.created_at DESC, h.id DESC LIMIT 5000`,
   ).bind(...where.params).all<{
-    id: string; crop_name: string; harvest_date: string | null; quantity: number | null; revenue_paise: number; buyer: string | null; notes: string | null;
+    id: string; crop_name: string; harvest_date: string | null; quantity: number | null; revenue_paise: string; buyer: string | null; notes: string | null;
   }>();
-  return rows.results.map((row) => ({ id: row.id, cropName: row.crop_name, harvestDate: row.harvest_date, quantity: row.quantity, revenuePaise: row.revenue_paise, buyer: row.buyer, notes: row.notes }));
+  return rows.results.map((row) => ({ id: row.id, cropName: row.crop_name, harvestDate: row.harvest_date, quantity: row.quantity, revenuePaise: storedMoneyToNumber(row.revenue_paise), buyer: row.buyer, notes: row.notes }));
 }
 
 export async function getCashflowReport(db: D1Database, range: DateRange): Promise<{ expensePaise: number; revenuePaise: number; netCashFlowPaise: number }> {
@@ -177,11 +179,11 @@ export async function getCashflowReport(db: D1Database, range: DateRange): Promi
   const harvestRange = rangeWhere("harvest_date", range);
   const [expenses, harvests] = await Promise.all([
     db.prepare(`SELECT COALESCE(SUM(amount_paise), 0) AS amount_paise FROM expenses WHERE deleted_at IS NULL${expenseRange.sql}`).bind(...expenseRange.params).first<{ amount_paise: number }>(),
-    db.prepare(`SELECT COALESCE(SUM(COALESCE(actual_revenue_paise, calculated_revenue_paise)), 0) AS amount_paise FROM harvests WHERE harvest_date IS NOT NULL${harvestRange.sql}`).bind(...harvestRange.params).first<{ amount_paise: number }>(),
+    db.prepare(`SELECT CAST(COALESCE(SUM(COALESCE(actual_revenue_paise, calculated_revenue_paise)), 0) AS TEXT) AS amount_paise FROM harvests WHERE harvest_date IS NOT NULL${harvestRange.sql}`).bind(...harvestRange.params).first<{ amount_paise: string }>(),
   ]);
   const expensePaise = numberValue(expenses?.amount_paise);
-  const revenuePaise = numberValue(harvests?.amount_paise);
-  return { expensePaise, revenuePaise, netCashFlowPaise: revenuePaise - expensePaise };
+  const revenuePaise = storedMoneyToNumber(harvests?.amount_paise);
+  return { expensePaise, revenuePaise, netCashFlowPaise: safeMoneyDifference(revenuePaise, expensePaise) };
 }
 
 export async function listSettlementReport(db: D1Database, range: DateRange): Promise<SettlementReportRow[]> {

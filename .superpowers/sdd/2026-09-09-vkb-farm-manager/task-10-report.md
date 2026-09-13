@@ -40,3 +40,31 @@ The unit/frontend run includes the existing dashboard and reports React regressi
 ## Tooling note
 
 The repository's pre-existing unfiltered `npm run test` include glob also selects Worker tests under the jsdom config, where `cloudflare:test` is unavailable. The configured suites above are therefore intentionally split between unit/frontend and `test:worker`; both pass in full.
+
+## Review round 1 fixes
+
+Completed on 2026-09-13 against Task 10 commit `cd66aad`:
+
+- PATCH basis review now compares canonical thousandth-kilogram weight and integer-paise price independently. The regression for an imported `2.5 kg × ₹40` record changing to `5 kg × ₹20` confirms that an unexplained cached legacy difference cannot bypass review merely because its calculated total is unchanged.
+- Harvest summary, dated chart buckets, dashboard totals, recent dashboard harvests, harvest reports, and cashflow now read authoritative money through exact text and reject values outside JavaScript's safe-integer range with the sanitized `DATA_RANGE_ERROR` contract. Weighted average price no longer uses SQLite `REAL` multiplication: canonical three-decimal weights and integer-paise prices are combined and half-up rounded with `BigInt`.
+- The trusted importer applies a strict runtime schema for crop ID, real ISO-local/null date, decimal-string measurements, sale price, safe actual revenue, trimmed bounded sheet/fingerprint metadata, and a positive safe source row. Invalid calls return generic structured validation errors and never leak a raw `TypeError`.
+- Harvest pages are capped at `1,000,000`, keeping the maximum offset bounded; tests cover the maximum accepted and first rejected values.
+- Weight presentation retains up to three fractional kilograms, including `0.001 kg`. Both charts expose screen-reader-only lists containing every bucket and formatted value while their Recharts SVG presentations are hidden from assistive technology.
+- Frontend behavior coverage now includes loading, empty, error/retry, post-create query invalidation, chart text equivalence, thousandth-kilogram display, and failed deletion. Delete rejection is caught locally so the confirmation remains open with a retryable message.
+
+### Review TDD evidence
+
+- Worker RED: the focused run reported 5 expected failures covering same-total basis changes, trusted-import runtime validation, page ceiling, aggregate overflow, and dashboard/report overflow.
+- Worker GREEN: `npm run test:worker -- tests/worker/harvests.test.ts tests/worker/dashboard-reports.test.ts` passed 2 files / 24 tests.
+- Frontend GREEN: `npm run test -- tests/unit/format.test.ts src/features/harvest/HarvestPage.test.tsx` passed 2 files / 10 tests after adding the UI regressions.
+
+### Fresh final verification after review fixes
+
+| Check | Result |
+| --- | --- |
+| `npm run test -- tests/unit src` | PASS — 18 files, 72 tests |
+| `npm run test:worker` | PASS — 8 files, 61 tests |
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS — zero warnings allowed |
+| `npm run build` | PASS — Worker and client production bundles built |
+| `git diff --check` | PASS |

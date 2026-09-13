@@ -132,6 +132,24 @@ describe("dashboard and reports API", () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR" } });
   });
 
+  it("rejects unsafe harvest revenue totals in dashboard and cashflow contracts", async () => {
+    await env.DB.prepare("INSERT INTO crops (id, name) VALUES (?, ?)").bind("crop_range", "Range crop").run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO harvests (id, crop_id, harvest_date, actual_revenue_paise, calculated_revenue_paise) VALUES (?, ?, ?, ?, ?)")
+        .bind("range_one", "crop_range", "2026-09-01", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER),
+      env.DB.prepare("INSERT INTO harvests (id, crop_id, harvest_date, actual_revenue_paise, calculated_revenue_paise) VALUES (?, ?, ?, ?, ?)")
+        .bind("range_two", "crop_range", "2026-09-02", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER),
+    ]);
+
+    for (const path of ["/dashboard", "/reports/cashflow"]) {
+      const response = await request(path);
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: { code: "DATA_RANGE_ERROR", message: "Stored money exceeds the supported range" },
+      });
+    }
+  });
+
   it("calculates date-filtered contribution reports through the settlement service", async () => {
     await seedFixture();
     await env.DB.prepare(
