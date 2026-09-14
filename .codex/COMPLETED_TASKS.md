@@ -73,3 +73,13 @@ Implemented crop and farm-area administration, distinct plantation cohorts, coll
 Relevant commits: `11a407d`, `68681e8`, `c196ff9`.
 
 Important outcome: same crop/area/date cohorts remain separate; zero-quantity and inactive-reference history remains visible; imported undated EXCEL cohorts keep their null date during unrelated edits.
+
+---
+
+## 2026-09-14 — Harvest tracking and exact revenue
+
+Implemented exact scaled-decimal harvest revenue, role-aware audited CRUD/filter/summary APIs, trusted legacy import validation, safe aggregate reporting, and a responsive accessible Skyblue/Grey harvest experience.
+
+Relevant commits: `cd66aad`, `f3141f8`, `a1548de`.
+
+Important outcome: authoritative paise never uses binary-float revenue arithmetic; override basis changes require review; undated legacy harvests remain in totals but outside date buckets; all aggregate money is range-checked.

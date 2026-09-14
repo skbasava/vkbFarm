@@ -17,6 +17,7 @@
 - `src/features/settlements/` — settlement queries, responsive summary/form/history UI, and tests.
 - `src/features/dashboard/`, `src/features/reports/` — dashboard/report queries, responsive views, filters, charts, and tests.
 - `src/features/plantation/` — reviewed plantation summaries, cohort forms/editing, responsive matrix/cards, and paginated reference loading.
+- `src/features/harvest/` — reviewed harvest filters, exact revenue forms, responsive summaries/charts, legacy-date disclosure, and tests.
 - `src/lib/api-client.ts`, `format.ts`, `identity.ts`, `query-keys.ts` — shared API, display, identity, and query contracts.
 
 ## Backend
@@ -28,6 +29,7 @@
 - `worker/services/settlement-service.ts`, `worker/repositories/settlement-repository.ts`, `worker/routes/settlements.ts` — deterministic settlement calculation, persistence, and API.
 - `worker/repositories/report-repository.ts`, `worker/services/report-service.ts`, `worker/routes/dashboard.ts`, `worker/routes/reports.ts`, `worker/utils/csv.ts` — report aggregation and streamed export contracts.
 - `worker/validation/plantation.ts`, `worker/repositories/plantation-repository.ts`, `worker/services/plantation-service.ts`, `worker/routes/plantation.ts` — reviewed reference administration and distinct plantation-cohort APIs.
+- `worker/validation/harvests.ts`, `worker/repositories/harvest-repository.ts`, `worker/services/harvest-service.ts`, `worker/routes/harvests.ts`, `worker/utils/stored-integers.ts` — reviewed harvest CRUD/import boundary, exact revenue, and safe aggregate contracts.
 - `worker/validation/expenses.ts`, `worker/utils/money.ts`, `dates.ts` — input and representation invariants.
 
 ## Database
@@ -46,5 +48,5 @@
 
 ## Active checkpoint
 
-- `.codex/CURRENT_TASK.md` — exact Task 10 harvest implementation state. Load before touching source.
+- `.codex/CURRENT_TASK.md` — exact Task 11 Excel import implementation state. Load before touching source.
 - `git status --short`, `git diff --stat`, `git diff`, and `git log -5 --oneline` — current source-of-truth evidence.

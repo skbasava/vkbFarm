@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement Task 10: harvest tracking, exact revenue rules, CRUD/filter APIs, and responsive harvest reporting UI.
+Implement Task 11: conservative Excel normalization, dry-run/import CLI, idempotent D1 migration, and baseline verification.
 
 ## Status
 
@@ -10,51 +10,52 @@ NOT_STARTED
 
 ## User requirement
 
-Continue the approved VKB Farm Manager plan without per-step approval. Revenue calculations must avoid binary-float drift, manual/API harvests require valid dates, and legacy EXCEL rows may retain unavailable dates.
+Continue the approved VKB Farm Manager plan without per-step approval. The supplied workbook is authoritative only where the approved design says so; preserve formulas/cached values and source traceability, and never invent missing or ambiguous values.
 
 ## Completed
 
-- Task 9 plantation inventory is implemented and independently approved through `c196ff9`.
-- Distinct same-day cohorts are retained; normalized reference collisions fail before schema mutation; summaries include inactive historical references and zero-quantity cohorts.
-- Individual cohort PATCH editing is available, imported null dates are preserved, and form references paginate beyond 100.
-- Controller verification passed 28 frontend tests, 44 Worker tests, typecheck, lint, and production build.
+- Task 10 harvest tracking is implemented and independently approved through `a1548de`.
+- Revenue uses exact scaled-decimal/BigInt arithmetic, safe aggregate money handling, audited role-aware CRUD, and strict trusted-import validation.
+- The responsive Skyblue/Grey harvest page includes totals, filters, recent records, accessible chart equivalents, legacy undated disclosure, and full query invalidation.
+- Controller verification passed 74 unit/frontend tests, 64 Worker tests, typecheck, lint, production build, and diff hygiene.
 
 ## Remaining
 
-- Generate and read the Task 10 brief from the approved implementation plan.
-- Implement exact scaled-decimal revenue tests and harvest Worker APIs first, then responsive harvest UI.
-- Run the Task 10 review/fix loop and checkpoint the result.
+- Load the spreadsheet workflow and generate/read the Task 11 brief.
+- Copy the source workbook unchanged, checksum it, create deterministic synthetic fixtures, and implement normalization/import/verification test-first.
+- Verify exact approved workbook baselines and second-run idempotency, then run the Task 11 review/fix loop.
 
 ## Relevant files
 
-- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 10 requirements.
-- `migrations/0001_initial.sql` — harvest schema and legacy-null constraints.
-- `worker/utils/money.ts`, `worker/utils/dates.ts` — exact amount and farm-date contracts.
-- `worker/repositories/report-repository.ts` — dashboard/report harvest consumers.
-- `src/app/router.tsx`, `src/lib/query-keys.ts`, `src/lib/identity.ts`, `src/components/ui/` — UI/query/access contracts.
+- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 11 requirements.
+- `docs/superpowers/specs/2026-09-09-vkb-farm-manager-design.md` — authoritative workbook rules and baselines.
+- `docs/DECISIONS.md` — conservative import policy.
+- `/home/satish/Downloads/VKB-Farm-Expense-tracker.xlsx` — user-supplied source workbook.
+- `migrations/`, `tests/fixtures/database.ts` — destination schema and disposable D1 setup.
+- `worker/services/harvest-service.ts` — trusted EXCEL harvest import boundary.
 - `.superpowers/sdd/2026-09-09-vkb-farm-manager/progress.md` — implementation ledger.
 
 ## Files modified
 
-None for Task 10 yet. Git should be clean apart from this checkpoint update before it is committed.
+None for Task 11 yet. Git should be clean after this checkpoint is committed.
 
 ## Important implementation details
 
-Parse decimal kilograms as scaled integers before multiplying by paise-per-kilogram. Calculated revenue is the default; any actual-revenue override requires a reason. Manual/API rows require real ISO local dates, while legacy EXCEL rows may retain null dates and cached actual revenue.
+Import only authoritative Common Expense A:E rows; treat personal summaries as controls. Use explicit normalization maps, deterministic fingerprints, structured warnings/errors, dry-run safety, and dependency-ordered writes. Parse both plantation blocks and banana harvest rows while excluding totals. Formula cached values must be verified with the installed parser; derive only documented formulas if caches are unavailable and record every derivation.
 
 ## Tests
 
-Task 9 controller verification: 28 frontend tests and 44 Worker tests passed; typecheck, lint, and production build passed.
+Task 10 controller verification: 74 unit/frontend tests and 64 Worker tests passed; typecheck, lint, production build, and diff hygiene passed.
 
 ## Known failures / blockers
 
 - No active blocker.
-- Receipt file upload remains owned by Task 12; browser viewport inspection remains deferred to final acceptance.
+- The current `xlsx` dependency has known audit findings; Task 11 must assess a maintained replacement without sacrificing cached formula behavior.
 
 ## Next action
 
-Generate the Task 10 brief with the SDD task-brief script, then dispatch its fresh implementer.
+Read the spreadsheet skill, load bundled workspace dependencies, generate the Task 11 brief, and dispatch its fresh implementer.
 
 ## Resume instructions
 
-Read the root context files and Git state, then load only Task 10 plus the listed harvest schema/report consumers. Preserve existing dashboard/report contracts.
+Read the root context files and Git state, then load only Task 11, the approved import rules, destination schema/services, and workbook inspection evidence. Do not infer business values from summary sheets.

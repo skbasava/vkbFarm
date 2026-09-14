@@ -57,3 +57,17 @@ Implementation: Pending Task 11; no importer scripts or import workflow are impl
 Consequences: The future importer will run locally, be idempotent, and record warnings/errors. Legacy banana harvest rows may retain a null date; API-created harvests will require one.
 
 Do not: When implementing the importer, import summary/pivot regions, invent missing business values, or silently normalize ambiguous source values.
+
+## ADR-005 — Harvest revenue and aggregate money remain exact
+
+Status: Accepted
+
+Context: Harvest weights can contain thousandths of a kilogram, and valid row-level paise values can aggregate beyond JavaScript's safe-integer range.
+
+Decision: Parse harvest decimals into scaled integers, calculate and round revenue with `BigInt`, compare override bases by canonical weight and price, and carry D1 monetary aggregates as exact text until explicit safe-range validation.
+
+Reason: Binary floating point and early numeric conversion can silently change authoritative farm revenue or net cash flow.
+
+Consequences: Out-of-range aggregates fail with a sanitized data-range error; weighted averages use bounded keyset reads and incremental exact accumulation; UI measurement formatting preserves thousandths.
+
+Do not: Multiply currency by JavaScript or SQLite floating-point weights, accept already-rounded unsafe numbers, or retain unexplained legacy revenue after its calculation basis changes.
