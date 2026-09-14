@@ -52,9 +52,12 @@ Decision: Task 11 will import only authoritative `Common Expense` A:E ledger row
 
 Reason: Reconciliation evidence must not become duplicate transactions or fabricated data.
 
-Implementation: Pending Task 11; no importer scripts or import workflow are implemented yet.
+Implementation: `scripts/normalize-excel.ts`, `scripts/import-excel.ts`, and
+`scripts/verify-import.ts` implement the local-only workflow. The importer uses
+maintained SheetJS Community Edition 0.20.3 from the project's official CDN and
+reads raw formula objects without recalculating the source workbook.
 
-Consequences: The future importer will run locally, be idempotent, and record warnings/errors. Legacy banana harvest rows may retain a null date; API-created harvests will require one.
+Consequences: The importer runs locally, is idempotent, and records warnings/errors. Legacy banana harvest rows may retain a null date; API-created harvests require one.
 
 Do not: When implementing the importer, import summary/pivot regions, invent missing business values, or silently normalize ambiguous source values.
 

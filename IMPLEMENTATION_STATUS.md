@@ -9,5 +9,5 @@
 - Dashboard, reporting, and spreadsheet-safe CSV exports: complete
 - Plantation inventory and crop/farm-area administration: complete
 - Harvest tracking and exact revenue: implemented
-- Excel migration: remaining
+- Conservative Excel normalization, local-only dry run/import, idempotency, and independent verification: complete
 - Documents and production readiness: remaining

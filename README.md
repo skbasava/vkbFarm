@@ -26,8 +26,27 @@ valid for local development. Before remote deployment, create the D1 database an
 R2 bucket, then replace the `database_id` in both the root and `production`
 environment binding with the created D1 database ID.
 
-Later implementation slices add the complete migration, seeding, and production
-deployment instructions.
+## Import the legacy workbook locally
+
+The approved migration source is `data/VKB-Farm-Expense-tracker.xlsx`. Its SHA-256
+checksum is `655b77c344356bd9b201e616cf8c2766ec63495414c6673e02271471d5e8e67a`.
+The import command validates this checksum whenever that canonical filename is
+used. It never supports remote D1 and requires an explicit workbook path. A write
+also requires a dedicated local persistence directory.
+
+```bash
+npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --dry-run --errors /tmp/vkb-migration-errors.json
+npm run db:migrate:local -- --persist-to /tmp/vkb-farm-import
+npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --local-db /tmp/vkb-farm-import --errors /tmp/vkb-migration-errors.json
+npm run verify:import -- data/VKB-Farm-Expense-tracker.xlsx --local-db /tmp/vkb-farm-import
+```
+
+Use a new dedicated persistence directory for a disposable import. Repeating the
+import against the same local directory skips every matching business fingerprint.
+`migration-errors.json` contains structured invalid-row evidence; the CLI prints
+only counts, the source filename, and its checksum.
+
+Later implementation slices add the complete production deployment instructions.
 
 ## Production and preview security
 
