@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, FileUp, UploadCloud, X } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { useUploadDocument } from "./api";
 
@@ -29,22 +29,37 @@ function formatSize(bytes: number): string {
 export function ReceiptUpload({ expenseId }: { expenseId: string }) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File>();
-  const [issue, setIssue] = useState<string>();
-  const [uploadedName, setUploadedName] = useState<string>();
+  const [selection, setSelection] = useState<{
+    expenseId: string;
+    file?: File;
+    issue?: string;
+    uploadedName?: string;
+  }>(() => ({ expenseId }));
   const upload = useUploadDocument();
+  const file = selection.expenseId === expenseId ? selection.file : undefined;
+  const issue = selection.expenseId === expenseId ? selection.issue : undefined;
+  const uploadedName = selection.expenseId === expenseId
+    ? selection.uploadedName
+    : undefined;
+  const abortUpload = upload.abort;
+
+  useEffect(() => {
+    abortUpload();
+    if (inputRef.current) inputRef.current.value = "";
+  }, [abortUpload, expenseId]);
 
   const choose = (next?: File) => {
+    if (upload.isPending) return;
     upload.reset();
-    setUploadedName(undefined);
     if (!next) {
-      setFile(undefined);
-      setIssue(undefined);
+      setSelection({ expenseId });
       return;
     }
     const nextIssue = fileIssue(next);
-    setIssue(nextIssue);
-    setFile(nextIssue ? undefined : next);
+    setSelection({
+      expenseId,
+      ...(nextIssue ? { issue: nextIssue } : { file: next }),
+    });
   };
 
   const startUpload = async () => {
@@ -52,8 +67,7 @@ export function ReceiptUpload({ expenseId }: { expenseId: string }) {
     const currentName = file.name;
     try {
       await upload.mutateAsync({ expenseId, file });
-      setFile(undefined);
-      setUploadedName(currentName);
+      setSelection({ expenseId, uploadedName: currentName });
       if (inputRef.current) inputRef.current.value = "";
     } catch {
       // Mutation state owns the retryable error while `file` remains selected.
@@ -70,11 +84,13 @@ export function ReceiptUpload({ expenseId }: { expenseId: string }) {
         </div>
       </div>
       <label
+        aria-disabled={upload.isPending}
         className="receipt-upload__drop"
         htmlFor={inputId}
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
+          if (upload.isPending) return;
           choose(event.dataTransfer.files.item(0) ?? undefined);
         }}
       >
@@ -84,6 +100,7 @@ export function ReceiptUpload({ expenseId }: { expenseId: string }) {
           accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
           aria-label="Choose receipt file"
           className="sr-only"
+          disabled={upload.isPending}
           id={inputId}
           onChange={(event) => choose(event.target.files?.[0])}
           ref={inputRef}
@@ -97,7 +114,7 @@ export function ReceiptUpload({ expenseId }: { expenseId: string }) {
         </div>
       ) : null}
       {issue ? <p className="receipt-upload__error" role="alert"><AlertCircle aria-hidden="true" size={16} /> {issue}</p> : null}
-      {upload.isError ? <p className="receipt-upload__error" role="alert"><AlertCircle aria-hidden="true" size={16} /> {upload.error instanceof Error ? upload.error.message : "The receipt could not be uploaded"}</p> : null}
+      {upload.isError && (!(upload.error instanceof Error) || !("code" in upload.error) || upload.error.code !== "UPLOAD_ABORTED") ? <p className="receipt-upload__error" role="alert"><AlertCircle aria-hidden="true" size={16} /> {upload.error instanceof Error ? upload.error.message : "The receipt could not be uploaded"}</p> : null}
       {uploadedName ? <p className="receipt-upload__success" role="status"><CheckCircle2 aria-hidden="true" size={16} /> {uploadedName} is safely attached.</p> : null}
       {upload.isPending && upload.progress !== null ? (
         <div className="receipt-upload__progress" role="status">

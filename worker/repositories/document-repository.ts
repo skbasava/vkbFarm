@@ -15,8 +15,13 @@ export type StoredDocument = {
 
 export type DocumentWrite = Omit<
   StoredDocument,
-  "expenseDescription" | "expenseDate" | "createdAt"
+  "expenseDescription" | "expenseDate"
 >;
+
+export type LiveExpense = {
+  description: string;
+  expenseDate: string;
+};
 
 type DocumentRow = {
   id: string;
@@ -53,17 +58,18 @@ function mapDocument(row: DocumentRow): StoredDocument {
   };
 }
 
-export async function hasLiveExpense(
+export async function getLiveExpense(
   db: D1Database,
   expenseId: string,
-): Promise<boolean> {
+): Promise<LiveExpense | null> {
   const row = await db
     .prepare(
-      "SELECT id FROM expenses WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+      `SELECT description, expense_date AS expenseDate
+       FROM expenses WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
     )
     .bind(expenseId)
-    .first<{ id: string }>();
-  return Boolean(row);
+    .first<LiveExpense>();
+  return row ?? null;
 }
 
 export async function getStoredDocument(
@@ -110,6 +116,7 @@ function auditSnapshot(document: DocumentWrite): string {
     contentType: document.contentType,
     fileSize: document.fileSize,
     uploadedBy: document.uploadedBy,
+    createdAt: document.createdAt,
   });
 }
 
@@ -122,9 +129,10 @@ export function createDocumentStatements(
     db
       .prepare(
         `INSERT INTO documents (
-          id, expense_id, object_key, file_name, content_type, file_size, uploaded_by
+          id, expense_id, object_key, file_name, content_type, file_size,
+          uploaded_by, created_at
         )
-        SELECT ?, ?, ?, ?, ?, ?, ?
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?
         FROM expenses
         WHERE id = ? AND deleted_at IS NULL`,
       )
@@ -136,6 +144,7 @@ export function createDocumentStatements(
         document.contentType,
         document.fileSize,
         document.uploadedBy,
+        document.createdAt,
         document.expenseId,
       ),
     db

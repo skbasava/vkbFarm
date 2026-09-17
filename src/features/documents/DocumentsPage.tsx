@@ -1,4 +1,5 @@
 import { Archive, ChevronLeft, ChevronRight, FileCheck2, FolderOpen } from "lucide-react";
+import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "../../components/ui/button";
 import { EmptyState } from "../../components/ui/empty-state";
@@ -33,6 +34,13 @@ export default function DocumentsPage() {
   );
   const totalPages = Math.max(1, Math.ceil((documents.data?.meta.total ?? 0) / PAGE_SIZE));
 
+  useEffect(() => {
+    if (!documents.isSuccess || page <= totalPages) return;
+    const next = new URLSearchParams(search);
+    next.set("page", String(totalPages));
+    setSearch(next, { replace: true });
+  }, [documents.isSuccess, page, search, setSearch, totalPages]);
+
   const updateSearch = (changes: Record<string, string | undefined>) => {
     const next = new URLSearchParams(search);
     for (const [key, value] of Object.entries(changes)) {
@@ -57,7 +65,7 @@ export default function DocumentsPage() {
 
       {identity.isLoading ? <div aria-label="Loading document access" className="documents-loading"><Skeleton /><Skeleton /></div> : null}
       {!identity.isLoading && !canWrite ? <p className="documents-page__readonly">Read-only document access: you can inspect and open receipts, but only editors and admins can change the shelf.</p> : null}
-      {!identity.isLoading && canWrite && expenseId && selectedExpenseExists ? <ReceiptUpload expenseId={expenseId} /> : null}
+      {!identity.isLoading && canWrite && expenseId && selectedExpenseExists ? <ReceiptUpload expenseId={expenseId} key={expenseId} /> : null}
 
       {selectedExpenseUnavailable ? (
         <ErrorState

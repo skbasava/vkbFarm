@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api-client";
 import { queryKeys } from "../../lib/query-keys";
 
@@ -130,18 +130,49 @@ function xhrError(xhr: XMLHttpRequest): ApiError {
 function uploadDocument(
   input: { expenseId: string; file: File },
   onProgress: (percentage: number) => void,
+  signal: AbortSignal,
 ): Promise<DocumentRecord> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let settled = false;
+    const cleanup = () => {
+      signal.removeEventListener("abort", abort);
+      xhr.upload.onprogress = null;
+      xhr.onabort = null;
+      xhr.onerror = null;
+      xhr.onload = null;
+    };
+    const settle = () => {
+      if (settled) return false;
+      settled = true;
+      cleanup();
+      return true;
+    };
+    const fail = (error: ApiError) => {
+      if (settle()) reject(error);
+    };
+    const succeed = (document: DocumentRecord) => {
+      if (settle()) resolve(document);
+    };
+    const abort = () => xhr.abort();
     xhr.open("POST", "/api/v1/documents");
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) {
         onProgress(Math.round((event.loaded / event.total) * 100));
       }
     };
+    xhr.onabort = () => {
+      fail(
+        new ApiError({
+          status: 0,
+          code: "UPLOAD_ABORTED",
+          message: "The receipt upload was cancelled",
+        }),
+      );
+    };
     xhr.onerror = () => {
       const isOffline = offline();
-      reject(
+      fail(
         new ApiError({
           status: 0,
           code: isOffline ? "OFFLINE" : "NETWORK_ERROR",
@@ -154,13 +185,13 @@ function uploadDocument(
     };
     xhr.onload = () => {
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(xhrError(xhr));
+        fail(xhrError(xhr));
         return;
       }
       try {
         const parsed = JSON.parse(xhr.responseText) as unknown;
         if (!isRecord(parsed) || !isRecord(parsed.data)) {
-          reject(
+          fail(
             new ApiError({
               status: xhr.status,
               code: "INVALID_RESPONSE",
@@ -169,9 +200,9 @@ function uploadDocument(
           );
           return;
         }
-        resolve(parsed.data as DocumentRecord);
+        succeed(parsed.data as DocumentRecord);
       } catch {
-        reject(
+        fail(
           new ApiError({
             status: xhr.status,
             code: "INVALID_RESPONSE",
@@ -183,6 +214,17 @@ function uploadDocument(
     const form = new FormData();
     form.append("expenseId", input.expenseId);
     form.append("file", input.file);
+    if (signal.aborted) {
+      fail(
+        new ApiError({
+          status: 0,
+          code: "UPLOAD_ABORTED",
+          message: "The receipt upload was cancelled",
+        }),
+      );
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
     xhr.send(form);
   });
 }
@@ -190,10 +232,16 @@ function uploadDocument(
 export function useUploadDocument() {
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<number | null>(null);
+  const controllerRef = useRef<AbortController | undefined>(undefined);
   const mutation = useMutation({
     mutationFn: (input: { expenseId: string; file: File }) => {
+      controllerRef.current?.abort();
+      const controller = new AbortController();
+      controllerRef.current = controller;
       setProgress(null);
-      return uploadDocument(input, setProgress);
+      return uploadDocument(input, setProgress, controller.signal).finally(() => {
+        if (controllerRef.current === controller) controllerRef.current = undefined;
+      });
     },
     onSuccess: async (_document, input) => {
       await Promise.all([
@@ -203,7 +251,21 @@ export function useUploadDocument() {
       ]);
     },
   });
-  return { ...mutation, progress };
+  const resetMutation = mutation.reset;
+  const abort = useCallback(() => {
+    controllerRef.current?.abort();
+    controllerRef.current = undefined;
+    setProgress(null);
+    resetMutation();
+  }, [resetMutation]);
+  useEffect(
+    () => () => {
+      controllerRef.current?.abort();
+      controllerRef.current = undefined;
+    },
+    [],
+  );
+  return { ...mutation, abort, progress };
 }
 
 export function useDeleteDocument(expenseId: string) {

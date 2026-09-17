@@ -6,9 +6,12 @@ import type { Bindings } from "../../worker/types";
 type DocumentDto = {
   id: string;
   expenseId: string;
+  expenseDescription: string;
+  expenseDate: string;
   fileName: string;
   contentType: string;
   fileSize: number;
+  uploadedBy: string | null;
   contentUrl: string;
   createdAt: string;
 };
@@ -230,6 +233,54 @@ describe("document API", () => {
     }
   });
 
+  it("reports storage failure when D1 fails and R2 compensation cannot delete", async () => {
+    await env.DB.prepare(
+      `CREATE TRIGGER block_document_audit
+       BEFORE INSERT ON audit_log
+       WHEN NEW.entity_type = 'document'
+       BEGIN SELECT RAISE(ABORT, 'document audit blocked'); END`,
+    ).run();
+    const undeletableBucket = new Proxy(env.RECEIPTS, {
+      get(target, property) {
+        if (property === "delete") {
+          return async () => {
+            throw new Error("simulated R2 compensation failure");
+          };
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const bindings = { ...env, RECEIPTS: undeletableBucket } satisfies Bindings;
+    const form = new FormData();
+    form.append("expenseId", "expense-document-test");
+    form.append("file", receiptFile());
+
+    try {
+      const response = await app.request(
+        "http://example.com/api/v1/documents",
+        { method: "POST", body: form },
+        bindings,
+      );
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "DOCUMENT_STORAGE_ERROR",
+          message: "The receipt could not be stored safely",
+        },
+      });
+      expect((await env.RECEIPTS.list()).objects).toHaveLength(1);
+      expect(
+        await env.DB.prepare("SELECT COUNT(*) AS count FROM documents").first<number>(
+          "count",
+        ),
+      ).toBe(0);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER block_document_audit").run();
+    }
+  });
+
   it("rechecks the live expense in the atomic metadata write and compensates a race", async () => {
     const racingBucket = new Proxy(env.RECEIPTS, {
       get(target, property) {
@@ -277,6 +328,117 @@ describe("document API", () => {
         "SELECT COUNT(*) AS count FROM audit_log WHERE entity_type = 'document'",
       ).first<number>("count"),
     ).toBe(0);
+  });
+
+  it("does not report a missing expense when race compensation cannot delete R2", async () => {
+    const undeletableRacingBucket = new Proxy(env.RECEIPTS, {
+      get(target, property) {
+        if (property === "put") {
+          return async (...args: Parameters<R2Bucket["put"]>) => {
+            const result = await target.put(...args);
+            await env.DB.prepare(
+              "UPDATE expenses SET deleted_at = ? WHERE id = ?",
+            )
+              .bind("2026-09-11T00:00:00.000Z", "expense-document-test")
+              .run();
+            return result;
+          };
+        }
+        if (property === "delete") {
+          return async () => {
+            throw new Error("simulated R2 compensation failure");
+          };
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const bindings = {
+      ...env,
+      RECEIPTS: undeletableRacingBucket,
+    } satisfies Bindings;
+    const form = new FormData();
+    form.append("expenseId", "expense-document-test");
+    form.append("file", receiptFile());
+
+    const response = await app.request(
+      "http://example.com/api/v1/documents",
+      { method: "POST", body: form },
+      bindings,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "DOCUMENT_STORAGE_ERROR",
+        message: "The receipt could not be stored safely",
+      },
+    });
+    expect((await env.RECEIPTS.list()).objects).toHaveLength(1);
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM documents").first<number>(
+        "count",
+      ),
+    ).toBe(0);
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_log WHERE entity_type = 'document'",
+      ).first<number>("count"),
+    ).toBe(0);
+  });
+
+  it("returns the committed upload without a fallible post-commit document lookup", async () => {
+    let documentLookups = 0;
+    const lookupRejectingDb = new Proxy(env.DB, {
+      get(target, property) {
+        if (property === "prepare") {
+          return (query: string) => {
+            if (
+              query.includes("FROM documents d") &&
+              query.includes("WHERE d.id = ? LIMIT 1")
+            ) {
+              documentLookups += 1;
+              throw new Error("simulated post-commit lookup failure");
+            }
+            return target.prepare(query);
+          };
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const bindings = { ...env, DB: lookupRejectingDb } satisfies Bindings;
+    const form = new FormData();
+    form.append("expenseId", "expense-document-test");
+    form.append("file", receiptFile());
+
+    const response = await app.request(
+      "http://example.com/api/v1/documents",
+      { method: "POST", body: form },
+      bindings,
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { data: DocumentDto };
+    expect(body.data).toMatchObject({
+      expenseId: "expense-document-test",
+      expenseDescription: "Document test expense",
+      expenseDate: "2026-09-10",
+      uploadedBy: "dev@vkb.local",
+      createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+    expect(documentLookups).toBe(0);
+    expect((await env.RECEIPTS.list()).objects).toHaveLength(1);
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM documents").first<number>(
+        "count",
+      ),
+    ).toBe(1);
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_log WHERE entity_type = 'document' AND action = 'CREATE'",
+      ).first<number>("count"),
+    ).toBe(1);
   });
 
   it("lists documents with bounded pagination and deterministic newest-first order", async () => {

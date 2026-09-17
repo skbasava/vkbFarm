@@ -2,8 +2,8 @@ import { ApiHttpError } from "../middleware/errors";
 import {
   createDocumentStatements,
   deleteDocumentStatements,
+  getLiveExpense,
   getStoredDocument,
-  hasLiveExpense,
   listStoredDocuments,
   type DocumentWrite,
   type StoredDocument,
@@ -114,6 +114,26 @@ function storageFailure(message: string): ApiHttpError {
   return new ApiHttpError(503, "DOCUMENT_STORAGE_ERROR", message);
 }
 
+async function compensateUpload(
+  bucket: R2Bucket,
+  objectKey: string,
+  documentId: string,
+  stage: "database_write" | "expense_race",
+): Promise<void> {
+  try {
+    await bucket.delete(objectKey);
+  } catch {
+    console.error(
+      JSON.stringify({
+        event: "document_upload_compensation_failed",
+        documentId,
+        stage,
+      }),
+    );
+    throw storageFailure("The receipt could not be stored safely");
+  }
+}
+
 export async function listDocuments(
   db: D1Database,
   input: { expenseId?: string; page: number; pageSize: number },
@@ -127,7 +147,8 @@ export async function createDocument(
   input: { expenseId: string; file: File },
   actor: string,
 ): Promise<DocumentDto> {
-  if (!(await hasLiveExpense(env.DB, input.expenseId))) {
+  const expense = await getLiveExpense(env.DB, input.expenseId);
+  if (!expense) {
     throw new ApiHttpError(
       404,
       "EXPENSE_NOT_FOUND",
@@ -146,6 +167,7 @@ export async function createDocument(
     contentType: input.file.type.trim().toLowerCase(),
     fileSize: input.file.size,
     uploadedBy: actor,
+    createdAt: new Date().toISOString(),
   };
 
   try {
@@ -166,20 +188,17 @@ export async function createDocument(
       createDocumentStatements(env.DB, write, actor),
     );
   } catch {
-    try {
-      await env.RECEIPTS.delete(objectKey);
-    } catch {
-      console.error(JSON.stringify({ event: "document_upload_compensation_failed" }));
-    }
+    await compensateUpload(
+      env.RECEIPTS,
+      objectKey,
+      id,
+      "database_write",
+    );
     throw storageFailure("The receipt could not be stored");
   }
 
   if (writeResults[0]?.meta.changes !== 1) {
-    try {
-      await env.RECEIPTS.delete(objectKey);
-    } catch {
-      console.error(JSON.stringify({ event: "document_upload_compensation_failed" }));
-    }
+    await compensateUpload(env.RECEIPTS, objectKey, id, "expense_race");
     throw new ApiHttpError(
       404,
       "EXPENSE_NOT_FOUND",
@@ -187,9 +206,11 @@ export async function createDocument(
     );
   }
 
-  const stored = await getStoredDocument(env.DB, id);
-  if (!stored) throw storageFailure("The receipt could not be read after storing");
-  return toDto(stored);
+  return toDto({
+    ...write,
+    expenseDescription: expense.description,
+    expenseDate: expense.expenseDate,
+  });
 }
 
 export async function getDocumentContent(

@@ -76,7 +76,10 @@ function pageFetch(role: "admin" | "editor" | "viewer", documents = [pdfDocument
 
 class MockXhr {
   static instances: MockXhr[] = [];
+  aborted = false;
+  body: FormData | null = null;
   method = "";
+  onabort: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onload: (() => void) | null = null;
   responseText = "";
@@ -95,7 +98,14 @@ class MockXhr {
     this.url = url;
   }
 
-  send() {}
+  abort() {
+    this.aborted = true;
+    this.onabort?.();
+  }
+
+  send(body: FormData) {
+    this.body = body;
+  }
 }
 
 describe("DocumentsPage", () => {
@@ -181,6 +191,80 @@ describe("DocumentsPage", () => {
     expect(screen.queryByLabelText("Choose receipt file")).not.toBeInTheDocument();
   });
 
+  it("replaces an out-of-range document page with the last valid page", async () => {
+    const documentRequests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url === "/api/v1/identity") {
+        return ok({ email: "viewer@vkb.test", role: "viewer" });
+      }
+      if (url.startsWith("/api/v1/expenses?")) {
+        return ok([], { page: 1, pageSize: 100, total: 0 });
+      }
+      if (url.startsWith("/api/v1/documents?")) {
+        documentRequests.push(url);
+        const page = new URL(url, "https://farm.test").searchParams.get("page");
+        return page === "999"
+          ? ok([], { page: 999, pageSize: 25, total: 26 })
+          : ok([imageDocument], { page: 2, pageSize: 25, total: 26 });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    render(providers(<DocumentsPage />, "/documents?page=999"));
+
+    expect(await screen.findByText("pump.jpg")).toBeVisible();
+    expect(
+      documentRequests.some((url) =>
+        new URL(url, "https://farm.test").searchParams.get("page") === "2"),
+    ).toBe(true);
+  });
+
+  it("returns to the previous page after deleting its last receipt", async () => {
+    let secondPageReads = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === "/api/v1/identity") {
+        return ok({ email: "editor@vkb.test", role: "editor" });
+      }
+      if (url.startsWith("/api/v1/expenses?")) {
+        return ok(
+          [{ id: "expense-1", expenseDate: "2026-09-10", description: "Diesel" }],
+          { page: 1, pageSize: 100, total: 1 },
+        );
+      }
+      if (url === "/api/v1/documents/document-image" && init?.method === "DELETE") {
+        return ok({ id: "document-image", deleted: true });
+      }
+      if (url.startsWith("/api/v1/documents?")) {
+        const page = new URL(url, "https://farm.test").searchParams.get("page");
+        if (page === "2") {
+          secondPageReads += 1;
+          return secondPageReads === 1
+            ? ok([imageDocument], { page: 2, pageSize: 25, total: 26 })
+            : ok([], { page: 2, pageSize: 25, total: 25 });
+        }
+        return ok([pdfDocument], { page: 1, pageSize: 25, total: 25 });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    const user = userEvent.setup();
+    render(providers(<DocumentsPage />, "/documents?page=2"));
+
+    expect(await screen.findByText("pump.jpg")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Delete receipt pump.jpg" }));
+    await user.click(screen.getByRole("button", { name: "Delete receipt" }));
+
+    expect(await screen.findByText("diesel-invoice.pdf")).toBeVisible();
+    expect(
+      fetchSpy.mock.calls.some(([url]) => {
+        const value = String(url);
+        return value.startsWith("/api/v1/documents?") &&
+          new URL(value, "https://farm.test").searchParams.get("page") === "1";
+      }),
+    ).toBe(true);
+  });
+
   it("shows an offline recovery state without discarding the selected expense", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       if (String(input) === "/api/v1/identity") {
@@ -244,6 +328,71 @@ describe("ReceiptUpload", () => {
     expect(screen.getByText("fertiliser.pdf")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Try upload again" }));
     expect(MockXhr.instances).toHaveLength(2);
+  });
+
+  it("cannot carry a selected receipt from one expense into another", async () => {
+    vi.stubGlobal("XMLHttpRequest", MockXhr);
+    const user = userEvent.setup();
+    const view = render(providers(<ReceiptUpload expenseId="expense-a" />));
+    const fileA = new File(["%PDF-1.7\nA"], "expense-a.pdf", {
+      type: "application/pdf",
+    });
+    const fileB = new File(["%PDF-1.7\nB"], "expense-b.pdf", {
+      type: "application/pdf",
+    });
+
+    await user.upload(screen.getByLabelText("Choose receipt file"), fileA);
+    expect(screen.getByText("expense-a.pdf")).toBeVisible();
+
+    view.rerender(providers(<ReceiptUpload expenseId="expense-b" />));
+    await waitFor(() =>
+      expect(screen.queryByText("expense-a.pdf")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Upload receipt" })).not.toBeInTheDocument();
+
+    await user.upload(screen.getByLabelText("Choose receipt file"), fileB);
+    await user.click(screen.getByRole("button", { name: "Upload receipt" }));
+    const body = MockXhr.instances[0]?.body;
+    expect(body?.get("expenseId")).toBe("expense-b");
+    expect(body?.get("file")).toBe(fileB);
+  });
+
+  it("aborts a pending upload when the expense context changes", async () => {
+    vi.stubGlobal("XMLHttpRequest", MockXhr);
+    const user = userEvent.setup();
+    const view = render(providers(<ReceiptUpload expenseId="expense-a" />));
+    const file = new File(["%PDF-1.7\nA"], "expense-a.pdf", {
+      type: "application/pdf",
+    });
+
+    await user.upload(screen.getByLabelText("Choose receipt file"), file);
+    await user.click(screen.getByRole("button", { name: "Upload receipt" }));
+    const xhr = MockXhr.instances[0];
+    expect(screen.getByLabelText("Choose receipt file")).toBeDisabled();
+
+    view.rerender(providers(<ReceiptUpload expenseId="expense-b" />));
+
+    await waitFor(() => expect(xhr?.aborted).toBe(true));
+    act(() => xhr?.onload?.());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("expense-a.pdf")).not.toBeInTheDocument();
+  });
+
+  it("aborts a pending upload when its surface unmounts", async () => {
+    vi.stubGlobal("XMLHttpRequest", MockXhr);
+    const user = userEvent.setup();
+    const view = render(providers(<ReceiptUpload expenseId="expense-a" />));
+    const file = new File(["%PDF-1.7\nA"], "expense-a.pdf", {
+      type: "application/pdf",
+    });
+
+    await user.upload(screen.getByLabelText("Choose receipt file"), file);
+    await user.click(screen.getByRole("button", { name: "Upload receipt" }));
+    const xhr = MockXhr.instances[0];
+
+    view.unmount();
+
+    expect(xhr?.aborted).toBe(true);
   });
 });
 
