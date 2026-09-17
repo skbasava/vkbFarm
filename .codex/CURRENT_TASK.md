@@ -2,60 +2,56 @@
 
 ## Goal
 
-Implement Task 11: conservative Excel normalization, dry-run/import CLI, idempotent D1 migration, and baseline verification.
+Implement Task 12: secure R2 receipt storage, audited document APIs, and the responsive receipt experience.
 
 ## Status
 
-NOT_STARTED
+READY_TO_IMPLEMENT
 
 ## User requirement
 
-Continue the approved VKB Farm Manager plan without per-step approval. The supplied workbook is authoritative only where the approved design says so; preserve formulas/cached values and source traceability, and never invent missing or ambiguous values.
+Continue the approved VKB Farm Manager plan without per-step approval. Use the Skyblue/Grey design system, keep receipt access private, and preserve a saved expense when a later receipt upload fails.
 
 ## Completed
 
-- Task 10 harvest tracking is implemented and independently approved through `a1548de`.
-- Revenue uses exact scaled-decimal/BigInt arithmetic, safe aggregate money handling, audited role-aware CRUD, and strict trusted-import validation.
-- The responsive Skyblue/Grey harvest page includes totals, filters, recent records, accessible chart equivalents, legacy undated disclosure, and full query invalidation.
-- Controller verification passed 74 unit/frontend tests, 64 Worker tests, typecheck, lint, production build, and diff hygiene.
+- Task 11 Excel normalization/import is implemented and independently approved through `fee6ad3`.
+- The local-only importer verifies the approved workbook exactly, preserves cached formulas and provenance, supports pre-0005 and prior-fingerprint upgrades, and remains idempotent.
+- Controller verification passed 114 non-Worker tests, 64 Worker tests, typecheck, lint, production build, and diff hygiene.
 
 ## Remaining
 
-- Load the spreadsheet workflow and generate/read the Task 11 brief.
-- Copy the source workbook unchanged, checksum it, create deterministic synthetic fixtures, and implement normalization/import/verification test-first.
-- Verify exact approved workbook baselines and second-run idempotency, then run the Task 11 review/fix loop.
+- Implement safe R2 object keys and strict JPG/JPEG/PNG/PDF validation with the configurable 10 MiB boundary.
+- Implement authenticated, role-aware document list/upload/read/delete APIs with D1 metadata, audit logging, and R2/D1 compensation.
+- Replace the Documents placeholder and integrate accessible upload, preview, retry, and delete flows with expense create/detail pages.
+- Run the Task 12 independent review/fix loop.
 
 ## Relevant files
 
-- `docs/superpowers/plans/2026-09-09-vkb-farm-manager.md` — Task 11 requirements.
-- `docs/superpowers/specs/2026-09-09-vkb-farm-manager-design.md` — authoritative workbook rules and baselines.
-- `docs/DECISIONS.md` — conservative import policy.
-- `/home/satish/Downloads/VKB-Farm-Expense-tracker.xlsx` — user-supplied source workbook.
-- `migrations/`, `tests/fixtures/database.ts` — destination schema and disposable D1 setup.
-- `worker/services/harvest-service.ts` — trusted EXCEL harvest import boundary.
-- `.superpowers/sdd/2026-09-09-vkb-farm-manager/progress.md` — implementation ledger.
-
-## Files modified
-
-None for Task 11 yet. Git should be clean after this checkpoint is committed.
+- `.superpowers/sdd/2026-09-09-vkb-farm-manager/task-12-brief.md` — exact Task 12 requirements.
+- `docs/superpowers/specs/2026-09-09-vkb-farm-manager-design.md` — private receipt lifecycle and UI authority.
+- `migrations/0001_initial.sql`, `migrations/0002_indexes.sql` — existing documents schema/index.
+- `worker/types.ts`, `wrangler.jsonc` — existing `RECEIPTS` binding.
+- `worker/routes/expenses.ts`, `worker/services/expense-service.ts` — role, validation, audit, and error patterns.
+- `src/features/expenses/ExpenseForm.tsx`, `src/features/expenses/ExpenseDetailPage.tsx` — receipt handoff consumers.
+- `.superpowers/sdd/2026-09-09-vkb-farm-manager/progress.md` — execution/review ledger.
 
 ## Important implementation details
 
-Import only authoritative Common Expense A:E rows; treat personal summaries as controls. Use explicit normalization maps, deterministic fingerprints, structured warnings/errors, dry-run safety, and dependency-ordered writes. Parse both plantation blocks and banana harvest rows while excluding totals. Formula cached values must be verified with the installed parser; derive only documented formulas if caches are unavailable and record every derivation.
+Generate R2 keys only on the server as `receipts/{year}/{month}/{uuid}-{safeFilename}`. Validate size, type, and file signature before storage. Put R2 first, then atomically write metadata and CREATE audit; compensate by deleting the object if D1 fails. Reads resolve only through an authorized document ID and never expose object keys. Deletes remove R2 before atomically deleting metadata and recording DELETE audit. Viewers may read; editors/admins may upload/delete.
 
 ## Tests
 
-Task 10 controller verification: 74 unit/frontend tests and 64 Worker tests passed; typecheck, lint, production build, and diff hygiene passed.
+Task 11 controller verification on 2026-09-17: 24 non-Worker files / 114 tests passed; 8 Worker files / 64 tests passed; typecheck, lint, build, and diff hygiene passed.
 
 ## Known failures / blockers
 
 - No active blocker.
-- The current `xlsx` dependency has known audit findings; Task 11 must assess a maintained replacement without sacrificing cached formula behavior.
+- A fresh online dependency audit remains policy-blocked; the last authoritative audit was 0 production findings and 6 high development-only Cloudflare-toolchain findings.
 
 ## Next action
 
-Read the spreadsheet skill, load bundled workspace dependencies, generate the Task 11 brief, and dispatch its fresh implementer.
+Dispatch the fresh Task 12 implementer using the generated brief and the approved receipt/R2 rulings, then run its task-scoped review loop.
 
 ## Resume instructions
 
-Read the root context files and Git state, then load only Task 11, the approved import rules, destination schema/services, and workbook inspection evidence. Do not infer business values from summary sheets.
+Read the root context files and Git state, then load only Task 12, the approved receipt rules, existing expense/document schema, R2 bindings, and current UI/API patterns. Do not use remote R2 or D1.

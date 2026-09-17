@@ -26,31 +26,31 @@ One Worker serves the SPA and owns `/api/v1`. Routes delegate to middleware, ser
 
 ## Implemented
 
-Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, responsive shell, settlements, financial reporting, plantation inventory, and exact harvest tracking are committed through `a1548de`. Financial aggregates are range-checked, legacy undated records are preserved, and farm-operation UIs follow the Skyblue/Grey responsive system.
+Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, responsive shell, settlements, financial reporting, plantation inventory, exact harvest tracking, and the conservative Excel migration are committed through `fee6ad3`. Financial aggregates are range-checked, legacy undated records are preserved, and the approved workbook imports locally with exact provenance-aware verification and cross-version idempotency.
 
 ## In progress
 
-Task 11 Excel normalization/import is next and not started. See `.codex/CURRENT_TASK.md` for the exact first action.
+Task 12 secure R2 receipt storage and the document experience are next. See `.codex/CURRENT_TASK.md` for the exact first action.
 
 ## Important constraints
 
 - Money is integer paise; use decimal strings at the client boundary. Farm dates are ISO local dates; timestamps are UTC.
 - Production must fail closed without Cloudflare Access identity. Do not trust user-supplied roles.
 - Validate every write, parameterize SQL, and sanitize Worker errors.
-- The future importer uses only authoritative legacy ledger data, preserves source traceability and fingerprints, and never invents values.
+- The importer uses only authoritative legacy ledger data, preserves source traceability and fingerprints, and never invents values.
 - The original plan's workbook baselines remain fixed: 394 expenses, ₹29,76,197 total, 2,740 plantation, and ₹10,085 harvest revenue.
 
 ## Known issues
 
-- Receipt upload/document routes, import, settings, and final production/PWA work are still plan tasks.
-- The `xlsx` dependency had seven high audit findings at foundation setup; reassess its replacement during importer work rather than applying incompatible automatic changes.
+- Receipt upload/document routes, settings, and final production/PWA work are still plan tasks.
+- The importer replaced the stale parser with maintained SheetJS CE 0.20.3. Six high development-only findings remain in the Cloudflare toolchain; production audit was clean in the last authoritative run.
 
 ## Current priorities
 
-1. Implement and review the conservative workbook import.
-2. Implement secure receipt storage and documents.
-3. Implement documents, settings, and final acceptance in plan order.
+1. Implement and review secure receipt storage and documents.
+2. Implement settings and administration.
+3. Complete PWA, deployment, browser, and final acceptance work.
 
 ## Last updated
 
-2026-09-14 — Task 10 harvest tracking passed review; Task 11 Excel import is next.
+2026-09-17 — Task 11 Excel migration passed review and controller verification; Task 12 receipts/documents is next.

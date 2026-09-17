@@ -83,3 +83,13 @@ Implemented exact scaled-decimal harvest revenue, role-aware audited CRUD/filter
 Relevant commits: `cd66aad`, `f3141f8`, `a1548de`.
 
 Important outcome: authoritative paise never uses binary-float revenue arithmetic; override basis changes require review; undated legacy harvests remain in totals but outside date buckets; all aggregate money is range-checked.
+
+---
+
+## 2026-09-17 — Conservative Excel migration
+
+Implemented checksum-approved local workbook normalization, dry-run/import/verification CLIs, cached-formula handling, explicit transformation/provenance evidence, safe local persistence, atomic idempotent D1 writes, exact row-level verification, and compatibility for earlier Task 11 database states.
+
+Relevant commits: `113805a`, `79ac2ec`, `794d4d9`, `fee6ad3`.
+
+Important outcome: the approved workbook imports exactly 394 expenses, 40 plantation aggregates, and 3 legacy harvest rows; all financial controls reconcile, and a repeat run performs zero writes while reporting 437 duplicates.

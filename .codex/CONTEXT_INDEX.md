@@ -30,6 +30,7 @@
 - `worker/repositories/report-repository.ts`, `worker/services/report-service.ts`, `worker/routes/dashboard.ts`, `worker/routes/reports.ts`, `worker/utils/csv.ts` — report aggregation and streamed export contracts.
 - `worker/validation/plantation.ts`, `worker/repositories/plantation-repository.ts`, `worker/services/plantation-service.ts`, `worker/routes/plantation.ts` — reviewed reference administration and distinct plantation-cohort APIs.
 - `worker/validation/harvests.ts`, `worker/repositories/harvest-repository.ts`, `worker/services/harvest-service.ts`, `worker/routes/harvests.ts`, `worker/utils/stored-integers.ts` — reviewed harvest CRUD/import boundary, exact revenue, and safe aggregate contracts.
+- `scripts/normalize-excel.ts`, `scripts/import-excel.ts`, `scripts/verify-import.ts`, `scripts/source-policy.ts` — reviewed local-only workbook normalization, migration, compatibility, and exact verification.
 - `worker/validation/expenses.ts`, `worker/utils/money.ts`, `dates.ts` — input and representation invariants.
 
 ## Database
@@ -37,6 +38,7 @@
 - `migrations/0001_initial.sql` — normalized schema and reference seeds.
 - `migrations/0002_indexes.sql` — supporting indexes.
 - `migrations/0003_plantation_soft_delete_and_reference_normalization.sql`, `migrations/0004_plantation_distinct_cohorts.sql` — collision-safe reference normalization and distinct plantation cohorts.
+- `migrations/0005_import_provenance.sql` — additive expense enrichment provenance for imported rows.
 - `tests/fixtures/database.ts` — Worker-test database setup.
 
 ## Configuration and testing
@@ -48,5 +50,5 @@
 
 ## Active checkpoint
 
-- `.codex/CURRENT_TASK.md` — exact Task 11 Excel import implementation state. Load before touching source.
+- `.codex/CURRENT_TASK.md` — exact Task 12 receipt/document implementation state. Load before touching source.
 - `git status --short`, `git diff --stat`, `git diff`, and `git log -5 --oneline` — current source-of-truth evidence.
