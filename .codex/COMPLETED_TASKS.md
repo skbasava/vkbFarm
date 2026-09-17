@@ -103,3 +103,13 @@ Implemented private R2 receipt keys, strict JPEG/PNG/PDF validation, compensated
 Relevant commits: `0e369b8`, `c187478`, `6a0d0d5`.
 
 Important outcome: object keys never reach clients; uploads are bound to a live expense and exact 10 MiB limit; failed metadata writes compensate R2; concurrent deletion records one audit; viewers retain read-only historical access.
+
+---
+
+## 2026-09-17 — Settings and administrative configuration
+
+Implemented a lazy responsive Settings workspace for people, expense categories, crops, farm areas, and application facts with complete inactive pagination, admin-only POST/PATCH controls, non-destructive lifecycle warnings, reactivation, broad query invalidation, and field-mapped server validation.
+
+Relevant commits: `9244de0`, `c749aed`.
+
+Important outcome: editors and viewers have a useful read-only view; ordinary edits cannot overwrite concurrent active status; only explicit deactivate/reactivate actions change status; historical references are never hard-deleted.
