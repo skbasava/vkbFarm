@@ -3,6 +3,7 @@ export type Bindings = {
   RECEIPTS: R2Bucket;
   ENVIRONMENT: "local" | "production";
   DEV_AUTH_ENABLED?: string;
+  DOCUMENT_MAX_BYTES: string;
 };
 
 export type TestBindings = Bindings & {

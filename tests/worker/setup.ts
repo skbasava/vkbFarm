@@ -6,6 +6,13 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  while (true) {
+    const listed = await env.RECEIPTS.list();
+    if (listed.objects.length > 0) {
+      await env.RECEIPTS.delete(listed.objects.map((object) => object.key));
+    }
+    if (!listed.truncated) break;
+  }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM documents"),
     env.DB.prepare("DELETE FROM audit_log"),

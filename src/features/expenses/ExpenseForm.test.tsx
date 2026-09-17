@@ -78,7 +78,8 @@ describe("ExpenseForm", () => {
     const request = fetchSpy.mock.calls.find(([url, init]) => url === "/api/v1/expenses" && init?.method === "POST");
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ amount: "125.50", description: "Potting mix" });
     expect(await screen.findByRole("button", { name: /add another/i })).toBeVisible();
-    expect(screen.getByRole("link", { name: /attach it in documents/i })).toHaveAttribute("href", "/documents/new?expenseId=expense-1");
+    expect(screen.getByRole("link", { name: /open it in documents/i })).toHaveAttribute("href", "/documents/new?expenseId=expense-1");
+    expect(screen.getByLabelText("Choose receipt file")).toBeVisible();
     await user.click(screen.getByRole("button", { name: /add another/i }));
     expect(screen.getByLabelText("Amount")).toHaveValue("");
   });

@@ -74,3 +74,17 @@ Reason: Binary floating point and early numeric conversion can silently change a
 Consequences: Out-of-range aggregates fail with a sanitized data-range error; weighted averages use bounded keyset reads and incremental exact accumulation; UI measurement formatting preserves thousandths.
 
 Do not: Multiply currency by JavaScript or SQLite floating-point weights, accept already-rounded unsafe numbers, or retain unexplained legacy revenue after its calculation basis changes.
+
+## ADR-006 — Receipt access is metadata-scoped and private
+
+Status: Accepted
+
+Context: Farm receipts contain financial evidence that must remain available to authorized members without exposing R2 object names or public bucket URLs.
+
+Decision: Generate receipt keys only in the Worker, resolve reads through authenticated document IDs, and expose same-origin content URLs instead of object keys. Upload writes R2 first and atomically records D1 metadata plus audit, compensating the object if the database write fails. Delete removes R2 first and atomically records the audit plus metadata deletion. Existing receipts remain readable after expense soft deletion, while new uploads require the expense to be live at the atomic write boundary.
+
+Reason: The D1 document record stays the authorization boundary, financial evidence survives ledger soft deletion, and R2/D1 races cannot silently create a valid receipt for an archived expense or duplicate delete audits.
+
+Consequences: Viewer-or-higher roles may list and stream receipts; editor-or-higher roles may upload and delete. JPEG, PNG, and PDF uploads must pass MIME, extension, magic-byte, file-size, and bounded multipart-envelope validation. The client uses XHR only to report real upload progress and retains a failed file for retry.
+
+Do not: Publish the bucket, accept client-selected object keys, authorize reads by raw key, discard a saved expense when its later receipt upload fails, or filter historical receipts solely because the linked expense was soft-deleted.

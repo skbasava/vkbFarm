@@ -24,12 +24,14 @@
   ],
   "vars": {
     "ENVIRONMENT": "local",
-    "DEV_AUTH_ENABLED": "true"
+    "DEV_AUTH_ENABLED": "true",
+    "DOCUMENT_MAX_BYTES": "10485760"
   },
   "env": {
     "production": {
       "vars": {
-        "ENVIRONMENT": "production"
+        "ENVIRONMENT": "production",
+        "DOCUMENT_MAX_BYTES": "10485760"
       },
       "d1_databases": [
         {

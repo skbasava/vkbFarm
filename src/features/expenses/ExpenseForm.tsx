@@ -9,6 +9,7 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { useCategories, useCreateExpense, usePeople, useUpdateExpense } from "./api";
 import { todayInKolkata, toExpenseInput, validateExpense, type ExpenseFormErrors, type ExpenseFormValues } from "./schema";
 import type { Expense, ExpenseClass } from "./types";
+import { ReceiptUpload } from "../documents/ReceiptUpload";
 
 type ExpenseFormProps = { expense?: Expense; mode: "create" | "edit"; onSaved?: (expense: Expense) => void };
 
@@ -58,6 +59,7 @@ export function ExpenseForm({ expense, mode, onSaved }: ExpenseFormProps) {
 
   const addAnother = () => { setValues(initialValues()); setErrors({}); setSavedExpense(undefined); };
   const submitLabel = mutation.isPending ? "Saving expense…" : mode === "create" ? "Save expense" : "Save changes";
+  const receiptExpenseId = expense?.id ?? savedExpense?.id;
 
   if (categories.isError || people.isError) return <ErrorState title="We could not load entry options" description="Categories and people need to be available before an expense can be recorded." action={<Button onClick={() => { void categories.refetch(); void people.refetch(); }} variant="secondary">Try again</Button>} />;
 
@@ -72,7 +74,7 @@ export function ExpenseForm({ expense, mode, onSaved }: ExpenseFormProps) {
       <Field error={errors.description} label="Description" onChange={(event) => update("description", event.target.value)} placeholder="What was purchased or paid?" value={values.description} />
     </section>
       <details className="expense-form__optional"><summary>More details <span>optional</span></summary><div className="expense-form__optional-body"><label className="field"><span className="field__label">Expense class</span><select className="field__input" onChange={(event) => update("expenseClass", (event.target.value || null) as ExpenseClass | null)} value={values.expenseClass ?? ""}><option value="">Unclassified</option><option value="OPEX">OPEX</option><option value="CAPEX">CAPEX</option></select></label><Field label="Paid to" onChange={(event) => update("paidTo", event.target.value)} placeholder="Supplier or recipient" value={values.paidTo} /><label className="field"><span className="field__label">Notes</span><textarea className="field__input expense-form__notes" onChange={(event) => update("notes", event.target.value)} placeholder="Add context for the farm team" value={values.notes} /></label><label className="expense-form__shared"><input checked={values.isShared} onChange={(event) => update("isShared", event.target.checked)} type="checkbox" /> Split this cost across farm partners</label></div></details>
-    {expense?.id || savedExpense?.id ? <aside className="expense-form__receipt"><Paperclip aria-hidden="true" size={17} /><span><strong>Have the bill?</strong> <Link to={`/documents/new?expenseId=${expense?.id ?? savedExpense?.id}`}>Attach it in Documents</Link> after saving this expense.</span></aside> : null}
+    {receiptExpenseId ? <><aside className="expense-form__receipt"><Paperclip aria-hidden="true" size={17} /><span><strong>The expense is saved.</strong> Attach the bill below, or <Link to={`/documents/new?expenseId=${receiptExpenseId}`}>open it in Documents</Link>. A receipt error will not undo the ledger entry.</span></aside><ReceiptUpload expenseId={receiptExpenseId} /></> : null}
     {mutation.isError && !Object.keys(errors).length ? <p className="expense-form__submit-error" role="alert"><AlertCircle aria-hidden="true" size={16} /> {mutation.error instanceof Error ? mutation.error.message : "Could not save this expense"}</p> : null}
     <div className="expense-form__actions"><Button disabled={mutation.isPending} type="submit">{submitLabel}</Button>{mode === "edit" ? <Link className="button button--secondary" to={`/expenses/${expense?.id}`}>Cancel</Link> : null}</div>
   </form>;

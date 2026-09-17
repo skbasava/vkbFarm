@@ -10,4 +10,5 @@
 - Plantation inventory and crop/farm-area administration: complete
 - Harvest tracking and exact revenue: implemented
 - Conservative Excel normalization, local-only dry run/import, idempotency, and independent verification: complete
-- Documents and production readiness: remaining
+- Secure R2 receipts, audited document APIs, and responsive document experience: complete
+- Settings administration and final PWA/production readiness: remaining

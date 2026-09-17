@@ -17,7 +17,7 @@ const DashboardRoute = lazy(() => import("../features/dashboard/DashboardPage"))
 const PlantationRoute = lazy(() => import("../features/plantation/PlantationPage"));
 const HarvestRoute = lazy(() => import("../features/harvest/HarvestPage"));
 const ReportsRoute = lazy(() => import("../features/reports/ReportsPage"));
-const DocumentsRoute = lazy(async () => ({ default: placeholderRoute("Documents", "Keep bills and field paperwork together.") }));
+const DocumentsRoute = lazy(() => import("../features/documents/DocumentsPage"));
 const SettingsRoute = lazy(async () => ({ default: placeholderRoute("Settings", "Manage people, categories, and application preferences.") }));
 const SettlementsRoute = lazy(() => import("../features/settlements/SettlementPage"));
 
