@@ -5,8 +5,19 @@ import path from "node:path";
 export const CANONICAL_WORKBOOK_NAME = "VKB-Farm-Expense-tracker.xlsx";
 export const CANONICAL_WORKBOOK_SHA256 = "655b77c344356bd9b201e616cf8c2766ec63495414c6673e02271471d5e8e67a";
 
+export type ValidatedWorkbookSource = {
+  absolutePath: string;
+  bytes: Buffer;
+  checksum: string;
+  approvedSource: boolean;
+};
+
+export function workbookBytesChecksum(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 export async function workbookChecksum(workbookPath: string): Promise<string> {
-  return createHash("sha256").update(await fs.readFile(workbookPath)).digest("hex");
+  return workbookBytesChecksum(await fs.readFile(workbookPath));
 }
 
 export async function canonicalizePotentialPath(input: string): Promise<string> {
@@ -30,17 +41,20 @@ export async function canonicalizePotentialPath(input: string): Promise<string> 
 export async function validateWorkbookPath(
   workbookPath: string,
   options: { allowUnapprovedSource?: boolean } = {},
-): Promise<{ absolutePath: string; checksum: string; approvedSource: boolean }> {
+): Promise<ValidatedWorkbookSource> {
   if (!workbookPath.trim()) throw new Error("An explicit workbook path is required");
   const absolutePath = await canonicalizePotentialPath(workbookPath);
   const stat = await fs.stat(absolutePath);
   if (!stat.isFile() || path.extname(absolutePath).toLocaleLowerCase("en-IN") !== ".xlsx") {
     throw new Error("Workbook path must identify an .xlsx file");
   }
-  const checksum = await workbookChecksum(absolutePath);
+  // This immutable buffer is both hashed and parsed by callers, eliminating a
+  // pathname replacement window between source approval and interpretation.
+  const bytes = await fs.readFile(absolutePath);
+  const checksum = workbookBytesChecksum(bytes);
   const approvedSource = checksum === CANONICAL_WORKBOOK_SHA256;
   if (!approvedSource && !options.allowUnapprovedSource) {
     throw new Error("Workbook does not match the approved checksum; use --allow-unapproved-source only for explicit fixtures or noncanonical testing");
   }
-  return { absolutePath, checksum, approvedSource };
+  return { absolutePath, bytes, checksum, approvedSource };
 }

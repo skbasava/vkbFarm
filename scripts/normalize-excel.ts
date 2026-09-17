@@ -8,6 +8,7 @@ import {
   validateWorkbookPath,
   workbookChecksum,
 } from "./source-policy";
+import type { ValidatedWorkbookSource } from "./source-policy";
 import type {
   FormulaCache,
   ImportIssue,
@@ -188,6 +189,10 @@ function parseEnrichments(workbook: XLSX.WorkBook, changes: NormalizationChange[
   return entries;
 }
 
+function enrichmentKey(date: string, amountPaise: number, payer: string): string {
+  return `${date}\u0000${amountPaise}\u0000${payer}`;
+}
+
 function formulaCache(value: XLSX.CellObject | undefined): FormulaCache | null {
   if (!value?.f || typeof value.v !== "number" || !Number.isFinite(value.v)) return null;
   return { formula: value.f.replace(/^=/, ""), value: value.v };
@@ -199,6 +204,15 @@ function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
   const [{ row: headerRow, column: headerColumn }] = findHeaders(sheet, ["Date", "Description", "Amount", "Who Paid", "Expense Type"], "Common Expense");
   const { end } = sheetRange(sheet);
   const enrichments = parseEnrichments(workbook, changes);
+  const ledgerKeyCounts = new Map<string, number>();
+  for (let row = headerRow + 1; row <= end.r + 1; row += 1) {
+    const date = parseLegacyDate(rawValue(cell(sheet, row, headerColumn))).value;
+    const amountPaise = moneyPaise(cell(sheet, row, headerColumn + 2));
+    const payer = normalizePerson(textValue(cell(sheet, row, headerColumn + 3)).trim()).value;
+    if (!date || amountPaise === null || (payer !== "Mahesh" && payer !== "Satish")) continue;
+    const key = enrichmentKey(date, amountPaise, payer);
+    ledgerKeyCounts.set(key, (ledgerKeyCounts.get(key) ?? 0) + 1);
+  }
   const expenses: NormalizedExpense[] = [];
   let discovered = 0;
   let skipped = 0;
@@ -223,7 +237,9 @@ function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
       skipped += 1;
       continue;
     }
-    const payerRaw = textValue(cells[3]).trim();
+    const payerSource = textValue(cells[3]);
+    const payerRaw = payerSource.trim();
+    if (payerSource !== payerRaw) addChange(changes, sheetName, row, "paidBy", payerSource, payerRaw, "payer-trim");
     const payer = normalizePerson(payerRaw);
     if (payer.changed) addChange(changes, sheetName, row, "paidBy", payerRaw, payer.value, payer.rule!);
     if (payer.value !== "Mahesh" && payer.value !== "Satish") {
@@ -255,19 +271,22 @@ function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
     }
 
     const matching = enrichments.filter((entry) => entry.date === parsedDate.value && entry.amountPaise === amountPaise && entry.payer === payer.value);
+    const ledgerMatches = ledgerKeyCounts.get(enrichmentKey(parsedDate.value, amountPaise, payer.value)) ?? 0;
     let paidTo: string | null = null;
     let notes: string | null = null;
     let enrichmentSource: NormalizedExpense["enrichmentSource"] = null;
-    if (matching.length === 1) {
+    if (matching.length === 1 && ledgerMatches === 1) {
       paidTo = matching[0].paidTo;
       notes = matching[0].notes;
       enrichmentSource = matching[0].source;
-    } else if (matching.length > 1) {
-      warnings.push(issue("warning", "expense", "AMBIGUOUS_DETAIL_MATCH", sheetName, row, "Multiple exact detail-log matches exist; no enrichment was applied", raw));
+    } else if (matching.length > 0) {
+      warnings.push(issue("warning", "expense", "AMBIGUOUS_DETAIL_MATCH", sheetName, row, "The correlation key is not globally one ledger row to one detail row; no enrichment was applied", raw));
     }
 
     const categoryId = categoryName === "Uncategorized" ? "category_uncategorized" : stableId("category_import", fingerprint("category", normalizedName(categoryName)));
-    const identity = { sheet: sheetName, row, date: parsedDate.value, description, amountPaise, payer: payer.value, categoryName, paidTo, notes, enrichmentSource };
+    // Provenance is mutable metadata: keep the row's semantic identity stable when
+    // an otherwise identical detail-log entry is moved within its source sheet.
+    const identity = { sheet: sheetName, row, date: parsedDate.value, description, amountPaise, payer: payer.value, categoryName, paidTo, notes };
     const importFingerprint = fingerprint("expense", identity);
     expenses.push({
       id: stableId("expense_import", importFingerprint),
@@ -390,8 +409,6 @@ function harvestRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
       skipped += 1;
       continue;
     }
-    if (gross === null && raw.grossWeightKg != null) addChange(changes, sheetName, row, "grossWeightKg", raw.grossWeightKg, null, "dash-as-missing");
-    warnings.push(issue("warning", "harvest", "AMBIGUOUS_AVERAGE_WEIGHT", sheetName, row, "The source Avg. Weight column is used by the revenue formula as total net weight; average weight was left empty", { sourceHeader: "Avg. Weight (Kg)", cachedNetWeightKg: net }));
     let calculatedRevenuePaise: number;
     try {
       calculatedRevenuePaise = calculateRevenuePaise(decimalString(net), pricePaise);
@@ -400,6 +417,13 @@ function harvestRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
       skipped += 1;
       continue;
     }
+    if (actualPaise !== calculatedRevenuePaise) {
+      errors.push(issue("error", "harvest", "FORMULA_CACHE_MISMATCH", sheetName, row, "Cached harvest revenue does not equal exact net weight multiplied by sale price", { ...raw, calculatedRevenuePaise, cachedRevenuePaise: actualPaise }));
+      skipped += 1;
+      continue;
+    }
+    if (gross === null && raw.grossWeightKg != null) addChange(changes, sheetName, row, "grossWeightKg", raw.grossWeightKg, null, "dash-as-missing");
+    warnings.push(issue("warning", "harvest", "AMBIGUOUS_AVERAGE_WEIGHT", sheetName, row, "The source Avg. Weight column is used by the revenue formula as total net weight; average weight was left empty", { sourceHeader: "Avg. Weight (Kg)", cachedNetWeightKg: net }));
     const importFingerprint = fingerprint("harvest", { sheet: sheetName, row, quantity, gross, net, pricePaise, actualPaise, formula: cache.formula });
     records.push({
       id: stableId("harvest_import", importFingerprint),
@@ -437,9 +461,8 @@ function deduplicate<T extends { importFingerprint: string }>(records: T[]): { r
   return { records: unique, duplicates };
 }
 
-export async function normalizeWorkbook(workbookPath: string, options: { allowUnapprovedSource?: boolean } = {}): Promise<ImportPlan> {
-  const validated = await validateWorkbookPath(workbookPath, options);
-  const workbook = XLSX.readFile(validated.absolutePath, { cellDates: false, cellFormula: true, cellNF: true, raw: true });
+export function normalizeWorkbookSource(validated: ValidatedWorkbookSource): ImportPlan {
+  const workbook = XLSX.read(validated.bytes, { type: "buffer", cellDates: false, cellFormula: true, cellNF: true, raw: true });
   const changes: NormalizationChange[] = [];
   const warnings: ImportIssue[] = [];
   const errors: ImportIssue[] = [];
@@ -474,4 +497,8 @@ export async function normalizeWorkbook(workbookPath: string, options: { allowUn
     sourceChecksum: validated.checksum,
     approvedSource: validated.approvedSource,
   };
+}
+
+export async function normalizeWorkbook(workbookPath: string, options: { allowUnapprovedSource?: boolean } = {}): Promise<ImportPlan> {
+  return normalizeWorkbookSource(await validateWorkbookPath(workbookPath, options));
 }

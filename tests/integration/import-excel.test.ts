@@ -1,8 +1,10 @@
 // @vitest-environment node
 import fs from "node:fs/promises";
+import * as nodeFs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import * as XLSX from "xlsx";
 import initialSchema from "../../migrations/0001_initial.sql?raw";
 import indexes from "../../migrations/0002_indexes.sql?raw";
 import referenceNormalization from "../../migrations/0003_plantation_soft_delete_and_reference_normalization.sql?raw";
@@ -16,12 +18,23 @@ import {
   prepareLocalPersistenceDirectory,
 } from "../../scripts/import-excel";
 import { normalizeWorkbook } from "../../scripts/normalize-excel";
-import { verifyImport, verifyMain } from "../../scripts/verify-import";
+import { sourceControls, verifyImport, verifyMain } from "../../scripts/verify-import";
 
 const fixture = path.resolve("tests/fixtures/farm-import.xlsx");
 const canonical = path.resolve("data/VKB-Farm-Expense-tracker.xlsx");
 const databases: LocalD1Database[] = [];
 const tempDirectories: string[] = [];
+XLSX.set_fs(nodeFs);
+
+async function workbookVariant(update: (workbook: XLSX.WorkBook) => void): Promise<string> {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vkb-import-variant-"));
+  tempDirectories.push(directory);
+  const output = path.join(directory, "variant.xlsx");
+  const workbook = XLSX.readFile(fixture, { cellFormula: true, raw: true });
+  update(workbook);
+  XLSX.writeFile(workbook, output);
+  return output;
+}
 
 async function database(): Promise<LocalD1Database> {
   return databaseWithMigrations([initialSchema, indexes, referenceNormalization, plantationCohorts, importProvenance]);
@@ -70,6 +83,19 @@ describe("Excel import", () => {
       errors: expect.any(Array),
     });
     expect((await fs.readdir(directory)).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("reports a one-paise harvest formula-cache mismatch truthfully in dry-run mode", async () => {
+    const mismatched = await workbookVariant((workbook) => {
+      workbook.Sheets["Banana Harvest Details"].F2.v = 500.01;
+      workbook.Sheets["Banana Harvest Details"].F5.v = 950.01;
+    });
+    const errorsPath = path.join(path.dirname(mismatched), "errors.json");
+    const result = await importWorkbook({ workbookPath: mismatched, dryRun: true, errorsPath, allowUnapprovedSource: true });
+    expect(result).toMatchObject({ accepted: { harvests: 2 }, skipped: 3, errors: 3 });
+    const report = JSON.parse(await fs.readFile(errorsPath, "utf8")) as { errors: Array<{ code: string; row: number }> };
+    expect(report.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code: "FORMULA_CACHE_MISMATCH", row: 2 })]));
+    expect(() => sourceControls(XLSX.readFile(mismatched, { cellFormula: true, raw: true }))).toThrow("FORMULA_CACHE_MISMATCH");
   });
 
   it("imports atomically in dependency order and the exact second run is a no-op", async () => {
@@ -128,6 +154,53 @@ describe("Excel import", () => {
       expect.objectContaining({ name: "control expenseTotalPaise", ok: true }),
     ]));
     expect(await verifyMain([fixture, "--local-db", db.persistTo, "--allow-unapproved-source"], db)).toBe(1);
+  });
+
+  it("detects tampering of imported expense policy fields", async () => {
+    const db = await database();
+    await applyImportPlan(db, await normalizeWorkbook(fixture, { allowUnapprovedSource: true }));
+    const [otherCrop] = await db.query<{ id: string }>("SELECT id FROM crops WHERE normalized_name <> 'banana' ORDER BY id LIMIT 1");
+    const mutations = [
+      { sql: "UPDATE expenses SET is_shared = 0 WHERE source_row = 4", reset: "UPDATE expenses SET is_shared = 1 WHERE source_row = 4" },
+      { sql: "UPDATE expenses SET expense_class = 'CAPEX' WHERE source_row = 4", reset: "UPDATE expenses SET expense_class = NULL WHERE source_row = 4" },
+      { sql: "UPDATE expenses SET crop_id = ? WHERE source_row = 4", params: [otherCrop.id], reset: "UPDATE expenses SET crop_id = NULL WHERE source_row = 4" },
+    ];
+
+    for (const mutation of mutations) {
+      await db.batch([{ sql: mutation.sql, params: mutation.params }]);
+      const result = await verifyImport(db, fixture, { allowUnapprovedSource: true });
+      expect(result.checks).toEqual(expect.arrayContaining([expect.objectContaining({ name: "expense exact projection", ok: false })]));
+      await db.batch([{ sql: mutation.reset }]);
+    }
+  });
+
+  it("detects tampering of the imported plantation date policy", async () => {
+    const db = await database();
+    await applyImportPlan(db, await normalizeWorkbook(fixture, { allowUnapprovedSource: true }));
+    await db.batch([{ sql: "UPDATE plantation_inventory SET planting_date = '2024-01-01' WHERE source_row = 2" }]);
+
+    const result = await verifyImport(db, fixture, { allowUnapprovedSource: true });
+    expect(result.checks).toEqual(expect.arrayContaining([expect.objectContaining({ name: "plantation exact projection", ok: false })]));
+  });
+
+  it("detects tampering of every imported harvest policy field", async () => {
+    const db = await database();
+    await applyImportPlan(db, await normalizeWorkbook(fixture, { allowUnapprovedSource: true }));
+    const [otherCrop] = await db.query<{ id: string }>("SELECT id FROM crops WHERE normalized_name <> 'banana' ORDER BY id LIMIT 1");
+    const mutations = [
+      { sql: "UPDATE harvests SET crop_id = ? WHERE source_row = 2", params: [otherCrop.id], reset: "UPDATE harvests SET crop_id = (SELECT id FROM crops WHERE normalized_name = 'banana') WHERE source_row = 2" },
+      { sql: "UPDATE harvests SET harvest_date = '2024-01-01' WHERE source_row = 2", reset: "UPDATE harvests SET harvest_date = NULL WHERE source_row = 2" },
+      { sql: "UPDATE harvests SET average_weight_kg = 1 WHERE source_row = 2", reset: "UPDATE harvests SET average_weight_kg = NULL WHERE source_row = 2" },
+      { sql: "UPDATE harvests SET revenue_override_reason = 'tampered' WHERE source_row = 2", reset: "UPDATE harvests SET revenue_override_reason = NULL WHERE source_row = 2" },
+      { sql: "UPDATE harvests SET buyer = 'tampered' WHERE source_row = 2", reset: "UPDATE harvests SET buyer = NULL WHERE source_row = 2" },
+    ];
+
+    for (const mutation of mutations) {
+      await db.batch([{ sql: mutation.sql, params: mutation.params }]);
+      const result = await verifyImport(db, fixture, { allowUnapprovedSource: true });
+      expect(result.checks).toEqual(expect.arrayContaining([expect.objectContaining({ name: "harvest exact projection", ok: false })]));
+      await db.batch([{ sql: mutation.reset }]);
+    }
   });
 
   it("requires checksum approval regardless of filename unless explicitly opted in", async () => {
@@ -225,22 +298,60 @@ describe("Excel import", () => {
     expect(await db.query("SELECT category_id FROM expenses ORDER BY source_row LIMIT 1")).toEqual([{ category_id: "category_existing_food" }]);
   });
 
-  it("applies provenance migration to a populated pre-0005 Task 11 database", async () => {
+  it("backfills provenance for a matching enriched expense imported before migration 0005", async () => {
     const db = await databaseWithMigrations([initialSchema, indexes, referenceNormalization, plantationCohorts]);
-    await db.batch([{
-      sql: `INSERT INTO expenses (
+    const plan = await normalizeWorkbook(fixture, { allowUnapprovedSource: true });
+    const enriched = plan.expenses[0];
+    await db.batch([
+      {
+        sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES (?, ?, ?)",
+        params: [enriched.categoryId, enriched.categoryName, enriched.categoryName.toLocaleLowerCase("en-IN")],
+      },
+      {
+        sql: `INSERT INTO expenses (
         id, expense_date, description, amount_paise, paid_by_person_id, category_id,
-        is_shared, source, source_sheet, source_row, import_fingerprint
-      ) VALUES (?, ?, ?, ?, ?, ?, 1, 'EXCEL', ?, ?, ?)`,
-      params: ["expense_legacy_probe", "2022-01-01", "Legacy Task 11 row", 100, "person_mahesh", "category_uncategorized", "Common Expense", 999, "legacy_task11_fingerprint"],
-    }]);
+        expense_class, paid_to, notes, crop_id, is_shared, source, source_sheet,
+        source_row, import_fingerprint
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, 'EXCEL', ?, ?, ?)`,
+        params: [enriched.id, enriched.expenseDate, enriched.description, enriched.amountPaise, enriched.paidByPersonId, enriched.categoryId, enriched.paidTo, enriched.notes, enriched.sourceSheet, enriched.sourceRow, enriched.importFingerprint],
+      },
+    ]);
 
     await db.exec(importProvenance);
-    expect(await db.query("SELECT id, enrichment_source_json FROM expenses WHERE id = 'expense_legacy_probe'")).toEqual([
-      { id: "expense_legacy_probe", enrichment_source_json: null },
+    expect(await db.query("SELECT id, enrichment_source_json FROM expenses WHERE id = ?", [enriched.id])).toEqual([
+      { id: enriched.id, enrichment_source_json: null },
     ]);
-    const result = await applyImportPlan(db, await normalizeWorkbook(fixture, { allowUnapprovedSource: true }));
-    expect(result.inserted.expenses).toBe(2);
+    const result = await applyImportPlan(db, plan);
+    expect(result).toMatchObject({ inserted: { expenses: 1 }, duplicates: 1, backfilled: { expenseEnrichmentProvenance: 1 } });
+    expect(await db.query("SELECT enrichment_source_json FROM expenses WHERE id = ?", [enriched.id])).toEqual([
+      { enrichment_source_json: JSON.stringify(enriched.enrichmentSource) },
+    ]);
+    const verification = await verifyImport(db, fixture, { allowUnapprovedSource: true });
+    expect(verification.checks.filter((check) => !check.ok)).toEqual([]);
+    expect(verification.ok).toBe(true);
+  });
+
+  it("refuses provenance backfill when an existing fingerprint has mismatched business fields", async () => {
+    const db = await database();
+    const plan = await normalizeWorkbook(fixture, { allowUnapprovedSource: true });
+    const enriched = plan.expenses[0];
+    await db.batch([
+      {
+        sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES (?, ?, ?)",
+        params: [enriched.categoryId, enriched.categoryName, enriched.categoryName.toLocaleLowerCase("en-IN")],
+      },
+      {
+        sql: `INSERT INTO expenses (
+          id, expense_date, description, amount_paise, paid_by_person_id, category_id,
+          expense_class, paid_to, notes, crop_id, is_shared, source, source_sheet,
+          source_row, import_fingerprint, enrichment_source_json
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, 'EXCEL', ?, ?, ?, NULL)`,
+        params: [enriched.id, enriched.expenseDate, "Tampered legacy description", enriched.amountPaise, enriched.paidByPersonId, enriched.categoryId, enriched.paidTo, enriched.notes, enriched.sourceSheet, enriched.sourceRow, enriched.importFingerprint],
+      },
+    ]);
+
+    await expect(applyImportPlan(db, plan)).rejects.toThrow("does not match the workbook projection");
+    expect(await db.query("SELECT COUNT(*) count FROM plantation_inventory")).toEqual([{ count: 0 }]);
   });
 
   it("handles simultaneous identical imports with database-safe duplicate counts", async () => {

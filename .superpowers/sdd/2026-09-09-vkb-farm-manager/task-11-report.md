@@ -58,6 +58,34 @@ verification command. No remote D1 path is accepted.
   schema paths, simultaneous imports, and the real approved workbook with its
   exact 437-duplicate rerun.
 
+## Review fix round 2
+
+- Matching enriched expenses originally imported before migration 0005 now
+  retain their historical semantic fingerprint. A rerun validates the complete
+  imported business projection and atomically backfills only missing
+  `enrichment_source_json`. Import results report this separately as
+  `backfilled.expenseEnrichmentProvenance`; mismatched or conflicting rows fail
+  closed before the batch executes.
+- Exact verification now covers deterministic row IDs, resolved foreign keys
+  and reference names, all workbook values, policy constants, nullable fields,
+  source metadata, fingerprints, provenance, and soft-delete state. Tamper tests
+  exercise expense sharing/class/crop, plantation date, and harvest crop,
+  harvest date, average weight, override reason, and buyer.
+- Expense enrichment is globally one ledger row to one detail row per
+  date/amount/payer key. Many-ledger/one-detail and many-to-many keys leave every
+  involved ledger row unenriched and emit explicit warnings.
+- Payer whitespace is accepted only through an explicit `payer-trim`
+  transformation using the raw cell value; the independent verifier applies the
+  same policy. Detail source coordinates remain provenance and no longer alter
+  an otherwise identical expense fingerprint.
+- A cached harvest revenue differing by even one paise from exact net weight ×
+  price produces `FORMULA_CACHE_MISMATCH`, is skipped, and is reported truthfully
+  by dry-run even if the workbook Grand Total was adjusted to match the bad
+  cache.
+- Source validation returns an immutable byte buffer. Normalization, import, and
+  verification hash and parse that same buffer, closing the pathname replacement
+  window between checksum approval and workbook interpretation.
+
 ## Source checksum and parser decision
 
 - The copied source and the supplied workbook both have SHA-256
@@ -111,9 +139,21 @@ disposable; removed after verification).
    revenue 1,008,500 paise.
 5. The second import inserted 0 categories, crops, expenses, plantation records,
    or harvests and reported exactly 437 duplicate business fingerprints.
-6. A separate disposable database applied migrations 0001–0004, accepted a
-   populated expense probe, upgraded through 0005, and preserved that row with
-   `enrichment_source_json = NULL`.
+6. A separate disposable database applied migrations 0001–0004, stored a
+   genuinely matching enriched expense with the historical fingerprint,
+   upgraded through 0005, and reran the import. The rerun inserted the other
+   expense, reported one duplicate and one provenance backfill, populated the
+   missing JSON, and passed exact verification. A mismatched-business-field
+   variant was rejected without partial writes.
+
+Fix-round-2 disposable CLI persistence directory:
+`/tmp/vkb-task11-fix2-99PeeU/db` (local-only and removed after evidence capture).
+All five migrations applied. The approved dry run accepted 394 expenses, 40
+plantation rows, and 3 harvests with 0 errors. The first import inserted 87
+categories, 23 crops, 394 expenses, 40 plantation rows, and 3 harvests with 0
+backfills. Exact verification returned `ok: true`; projection digests matched for
+394/40/3 rows. The rerun inserted nothing, backfilled nothing, and reported 437
+duplicates.
 
 ## Dependency and audit evidence
 
@@ -135,9 +175,9 @@ disposable; removed after verification).
 
 ## Final verification
 
-- Task-focused Vitest: 4 files, 28 tests passed.
+- Task-focused fix-round-2 Vitest: 2 files, 31 tests passed.
 - Unit/frontend/integration Vitest with Worker files excluded: 24 files,
-  102 tests passed.
+  110 tests passed.
 - Dedicated Cloudflare Worker Vitest: 8 files, 64 tests passed.
 - `npm run typecheck`, `npm run lint`, and `npm run build`: exited 0.
 - `git diff --check`: no whitespace errors.
@@ -174,3 +214,10 @@ disposable; removed after verification).
   production findings and six high development-only Cloudflare-toolchain
   findings. `npm audit --offline` had no cached advisories and was not treated
   as authoritative.
+- Fix round 2 again attempted the production online audit; the network sandbox
+  failed first and policy then rejected disclosure of the private dependency
+  tree to the public registry without separate user authorization. The safer
+  `npm audit --omit=dev --offline --json` and full `npm audit --offline --json`
+  both returned 0 cached findings across 547 dependencies, but are recorded as
+  offline evidence only. No dependencies or lockfile entries changed in this
+  round.

@@ -21,6 +21,21 @@ function fingerprint(kind: string, value: unknown): string {
   return hash(`${kind}\n${JSON.stringify(value)}`);
 }
 
+function stableId(prefix: string, value: string): string {
+  return `${prefix}_${value.slice(0, 24)}`;
+}
+
+function normalizedName(value: string): string {
+  return value.trim().toLocaleLowerCase("en-IN");
+}
+
+type ProjectionReferences = {
+  categoryIds: Map<string, string>;
+  cropIds: Map<string, string>;
+};
+
+const EMPTY_REFERENCES: ProjectionReferences = { categoryIds: new Map(), cropIds: new Map() };
+
 function cell(sheet: XLSX.WorkSheet, row: number, column: number): XLSX.CellObject | undefined {
   return sheet[XLSX.utils.encode_cell({ r: row - 1, c: column - 1 })] as XLSX.CellObject | undefined;
 }
@@ -99,9 +114,14 @@ function moneyPaise(value: number | null): number | null {
 }
 
 function strictPayer(value: unknown): { id: "person_mahesh" | "person_satish"; name: "Mahesh" | "Satish" } | null {
-  if (value === "Mahesh" || value === "mahesh" || value === "MAHESH") return { id: "person_mahesh", name: "Mahesh" };
-  if (value === "Satish" || value === "satish" || value === "SATISH") return { id: "person_satish", name: "Satish" };
+  const trimmed = typeof value === "string" ? value.trim() : value;
+  if (trimmed === "Mahesh" || trimmed === "mahesh" || trimmed === "MAHESH") return { id: "person_mahesh", name: "Mahesh" };
+  if (trimmed === "Satish" || trimmed === "satish" || trimmed === "SATISH") return { id: "person_satish", name: "Satish" };
   return null;
+}
+
+function enrichmentKey(date: string, amountPaise: number, payer: string): string {
+  return `${date}\u0000${amountPaise}\u0000${payer}`;
 }
 
 function categoryName(value: unknown): string {
@@ -133,12 +153,21 @@ function details(workbook: XLSX.WorkBook): Detail[] {
   return result;
 }
 
-function expenseProjection(workbook: XLSX.WorkBook) {
+function expenseProjection(workbook: XLSX.WorkBook, references: ProjectionReferences) {
   const sheetName = "Common Expense";
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error("Verification source sheet is missing: Common Expense");
   const [{ row: headerRow, column }] = findHeaders(sheet, ["Date", "Description", "Amount", "Who Paid", "Expense Type"], sheetName);
   const enrichment = details(workbook);
+  const ledgerKeyCounts = new Map<string, number>();
+  for (let row = headerRow + 1; row <= usedRange(sheet).e.r + 1; row += 1) {
+    const expenseDate = strictDate(raw(sheet, row, column));
+    const amountPaise = moneyPaise(numeric(sheet, row, column + 2));
+    const payer = strictPayer(raw(sheet, row, column + 3));
+    if (!expenseDate || amountPaise === null || !payer) continue;
+    const key = enrichmentKey(expenseDate, amountPaise, payer.name);
+    ledgerKeyCounts.set(key, (ledgerKeyCounts.get(key) ?? 0) + 1);
+  }
   const records: Array<Record<string, string | number | null>> = [];
   for (let row = headerRow + 1; row <= usedRange(sheet).e.r + 1; row += 1) {
     const values = [0, 1, 2, 3, 4].map((offset) => raw(sheet, row, column + offset));
@@ -150,9 +179,31 @@ function expenseProjection(workbook: XLSX.WorkBook) {
     const description = String(values[1] ?? "").trim() || "Imported expense";
     const category = categoryName(values[4]);
     const matches = enrichment.filter((entry) => entry.date === expenseDate && entry.amountPaise === amountPaise && entry.payer === payer.name);
-    const exact = matches.length === 1 ? matches[0] : null;
-    const identity = { sheet: sheetName, row, date: expenseDate, description, amountPaise, payer: payer.name, categoryName: category, paidTo: exact?.paidTo ?? null, notes: exact?.notes ?? null, enrichmentSource: exact?.source ?? null };
-    records.push({ expense_date: expenseDate, description, amount_paise: amountPaise, paid_by_person_id: payer.id, category_name: category, paid_to: exact?.paidTo ?? null, notes: exact?.notes ?? null, source_sheet: sheetName, source_row: row, import_fingerprint: fingerprint("expense", identity), enrichment_source_json: exact ? JSON.stringify(exact.source) : null });
+    const exact = matches.length === 1 && ledgerKeyCounts.get(enrichmentKey(expenseDate, amountPaise, payer.name)) === 1 ? matches[0] : null;
+    const identity = { sheet: sheetName, row, date: expenseDate, description, amountPaise, payer: payer.name, categoryName: category, paidTo: exact?.paidTo ?? null, notes: exact?.notes ?? null };
+    const importFingerprint = fingerprint("expense", identity);
+    const categoryId = references.categoryIds.get(normalizedName(category))
+      ?? (category === "Uncategorized" ? "category_uncategorized" : stableId("category_import", fingerprint("category", normalizedName(category))));
+    records.push({
+      id: stableId("expense_import", importFingerprint),
+      expense_date: expenseDate,
+      description,
+      amount_paise: amountPaise,
+      paid_by_person_id: payer.id,
+      category_id: categoryId,
+      category_name: category,
+      expense_class: null,
+      paid_to: exact?.paidTo ?? null,
+      notes: exact?.notes ?? null,
+      crop_id: null,
+      is_shared: 1,
+      source: "EXCEL",
+      source_sheet: sheetName,
+      source_row: row,
+      import_fingerprint: importFingerprint,
+      enrichment_source_json: exact ? JSON.stringify(exact.source) : null,
+      deleted_at: null,
+    });
   }
   return records.sort((a, b) => Number(a.source_row) - Number(b.source_row));
 }
@@ -161,7 +212,7 @@ function normalizedCrop(value: string): string {
   return value === "Bannana" ? "Banana" : value.trim();
 }
 
-function plantationProjection(workbook: XLSX.WorkBook) {
+function plantationProjection(workbook: XLSX.WorkBook, references: ProjectionReferences) {
   const sheetName = "Plantation Details";
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error("Verification source sheet is missing: Plantation Details");
@@ -186,7 +237,24 @@ function plantationProjection(workbook: XLSX.WorkBook) {
       }
     }
   }
-  return [...aggregates.values()].map((value) => ({ crop_name: value.crop, farm_area_id: value.area, quantity: value.quantity, notes: `Imported aggregate from ${value.sources.map((source) => `${source.sheet}!${source.column}${source.row}`).join(", ")}`, source_sheet: sheetName, source_row: value.sources[0].row, import_fingerprint: fingerprint("plantation", { cropName: value.crop, farmAreaId: value.area, quantity: value.quantity, sources: value.sources }) })).sort((a, b) => a.crop_name.localeCompare(b.crop_name, "en-IN") || a.farm_area_id.localeCompare(b.farm_area_id));
+  return [...aggregates.values()].map((value) => {
+    const importFingerprint = fingerprint("plantation", { cropName: value.crop, farmAreaId: value.area, quantity: value.quantity, sources: value.sources });
+    const cropFingerprint = fingerprint("crop", normalizedName(value.crop));
+    return {
+      id: stableId("plantation_import", importFingerprint),
+      crop_id: references.cropIds.get(normalizedName(value.crop)) ?? stableId("crop_import", cropFingerprint),
+      crop_name: value.crop,
+      farm_area_id: value.area,
+      quantity: value.quantity,
+      planting_date: null,
+      notes: `Imported aggregate from ${value.sources.map((source) => `${source.sheet}!${source.column}${source.row}`).join(", ")}`,
+      source: "EXCEL",
+      source_sheet: sheetName,
+      source_row: value.sources[0].row,
+      import_fingerprint: importFingerprint,
+      deleted_at: null,
+    };
+  }).sort((a, b) => a.crop_name.localeCompare(b.crop_name, "en-IN") || a.farm_area_id.localeCompare(b.farm_area_id));
 }
 
 function decimal(value: number): string {
@@ -207,7 +275,7 @@ function exactRevenue(weight: string, price: number): number {
   return Number((scaled * BigInt(price) + 500n) / 1_000n);
 }
 
-function harvestProjection(workbook: XLSX.WorkBook) {
+function harvestProjection(workbook: XLSX.WorkBook, references: ProjectionReferences) {
   const sheetName = "Banana Harvest Details";
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) throw new Error("Verification source sheet is missing: Banana Harvest Details");
@@ -229,18 +297,40 @@ function harvestProjection(workbook: XLSX.WorkBook) {
     const revenue = moneyPaise(numeric(sheet, row, column + 5));
     const formula = cell(sheet, row, column + 5)?.f?.replace(/^=/, "");
     if (quantity === null || net === null || price === null || revenue === null || !formula) continue;
+    const calculatedRevenue = exactRevenue(decimal(net), price);
+    if (revenue !== calculatedRevenue) throw new Error(`FORMULA_CACHE_MISMATCH at ${sheetName} row ${row}`);
     const identity = { sheet: sheetName, row, quantity, gross, net, pricePaise: price, actualPaise: revenue, formula };
-    records.push({ quantity: decimal(quantity), gross_weight_kg: gross === null ? null : decimal(gross), net_weight_kg: decimal(net), sale_price_paise_per_kg: price, calculated_revenue_paise: exactRevenue(decimal(net), price), actual_revenue_paise: revenue, notes: `Cached formula: ${formula}`, source_sheet: sheetName, source_row: row, import_fingerprint: fingerprint("harvest", identity) });
+    const importFingerprint = fingerprint("harvest", identity);
+    records.push({
+      id: stableId("harvest_import", importFingerprint),
+      crop_id: references.cropIds.get("banana") ?? stableId("crop_import", fingerprint("crop", "banana")),
+      crop_name: "Banana",
+      harvest_date: null,
+      quantity: decimal(quantity),
+      gross_weight_kg: gross === null ? null : decimal(gross),
+      net_weight_kg: decimal(net),
+      average_weight_kg: null,
+      sale_price_paise_per_kg: price,
+      calculated_revenue_paise: calculatedRevenue,
+      actual_revenue_paise: revenue,
+      revenue_override_reason: null,
+      buyer: null,
+      notes: `Cached formula: ${formula}`,
+      source: "EXCEL",
+      source_sheet: sheetName,
+      source_row: row,
+      import_fingerprint: importFingerprint,
+    });
   }
   if (grandTotal === null) throw new Error("Banana Harvest Details Grand Total cache is required for verification");
   if (Math.round(grandTotal * 100) !== records.reduce((sum, row) => sum + Number(row.actual_revenue_paise), 0)) throw new Error("Harvest rows do not reconcile to Grand Total");
   return records.sort((a, b) => Number(a.source_row) - Number(b.source_row));
 }
 
-function projections(workbook: XLSX.WorkBook) {
-  const expenses = expenseProjection(workbook);
-  const plantation = plantationProjection(workbook);
-  const harvests = harvestProjection(workbook);
+function projections(workbook: XLSX.WorkBook, references: ProjectionReferences = EMPTY_REFERENCES) {
+  const expenses = expenseProjection(workbook, references);
+  const plantation = plantationProjection(workbook, references);
+  const harvests = harvestProjection(workbook, references);
   const expenseTotalPaise = expenses.reduce((sum, row) => sum + Number(row.amount_paise), 0);
   const satishPaise = expenses.filter((row) => row.paid_by_person_id === "person_satish").reduce((sum, row) => sum + Number(row.amount_paise), 0);
   const maheshPaise = expenses.filter((row) => row.paid_by_person_id === "person_mahesh").reduce((sum, row) => sum + Number(row.amount_paise), 0);
@@ -255,16 +345,25 @@ function projectionCheck(name: string, source: unknown[], database: unknown[]): 
 
 export async function verifyImport(database: ImportDatabase, workbookPath: string, options: { allowUnapprovedSource?: boolean } = {}): Promise<VerificationResult> {
   const validated = await validateWorkbookPath(workbookPath, options);
-  const workbook = XLSX.readFile(validated.absolutePath, { cellDates: false, cellFormula: true, raw: true });
-  const source = projections(workbook);
-  const databaseExpenses = await database.query(`SELECT e.expense_date, e.description, e.amount_paise, e.paid_by_person_id, c.name category_name, e.paid_to, e.notes, e.source_sheet, e.source_row, e.import_fingerprint, e.enrichment_source_json FROM expenses e LEFT JOIN expense_categories c ON c.id = e.category_id WHERE e.source = 'EXCEL' AND e.source_sheet = 'Common Expense' AND e.deleted_at IS NULL ORDER BY e.source_row`);
-  const databasePlantation = await database.query(`SELECT c.name crop_name, p.farm_area_id, p.quantity, p.notes, p.source_sheet, p.source_row, p.import_fingerprint FROM plantation_inventory p JOIN crops c ON c.id = p.crop_id WHERE p.source = 'EXCEL' AND p.source_sheet = 'Plantation Details' AND p.deleted_at IS NULL ORDER BY c.name COLLATE NOCASE, p.farm_area_id`);
-  const rawDatabaseHarvests = await database.query<Record<string, unknown>>(`SELECT CAST(h.quantity AS TEXT) quantity, CASE WHEN h.gross_weight_kg IS NULL THEN NULL ELSE CAST(h.gross_weight_kg AS TEXT) END gross_weight_kg, CAST(h.net_weight_kg AS TEXT) net_weight_kg, h.sale_price_paise_per_kg, h.calculated_revenue_paise, h.actual_revenue_paise, h.notes, h.source_sheet, h.source_row, h.import_fingerprint FROM harvests h WHERE h.source = 'EXCEL' AND h.source_sheet = 'Banana Harvest Details' ORDER BY h.source_row`);
+  const workbook = XLSX.read(validated.bytes, { type: "buffer", cellDates: false, cellFormula: true, raw: true });
+  const [categoryRows, cropRows] = await Promise.all([
+    database.query<{ id: string; normalized_name: string }>("SELECT id, normalized_name FROM expense_categories"),
+    database.query<{ id: string; normalized_name: string }>("SELECT id, normalized_name FROM crops"),
+  ]);
+  const references = {
+    categoryIds: new Map(categoryRows.map((row) => [row.normalized_name, row.id])),
+    cropIds: new Map(cropRows.map((row) => [row.normalized_name, row.id])),
+  };
+  const source = projections(workbook, references);
+  const databaseExpenses = await database.query(`SELECT e.id, e.expense_date, e.description, e.amount_paise, e.paid_by_person_id, e.category_id, c.name category_name, e.expense_class, e.paid_to, e.notes, e.crop_id, e.is_shared, e.source, e.source_sheet, e.source_row, e.import_fingerprint, e.enrichment_source_json, e.deleted_at FROM expenses e LEFT JOIN expense_categories c ON c.id = e.category_id WHERE e.source = 'EXCEL' AND e.source_sheet = 'Common Expense' AND e.deleted_at IS NULL ORDER BY e.source_row`);
+  const databasePlantation = await database.query(`SELECT p.id, p.crop_id, c.name crop_name, p.farm_area_id, p.quantity, p.planting_date, p.notes, p.source, p.source_sheet, p.source_row, p.import_fingerprint, p.deleted_at FROM plantation_inventory p JOIN crops c ON c.id = p.crop_id WHERE p.source = 'EXCEL' AND p.source_sheet = 'Plantation Details' AND p.deleted_at IS NULL ORDER BY c.name COLLATE NOCASE, p.farm_area_id`);
+  const rawDatabaseHarvests = await database.query<Record<string, unknown>>(`SELECT h.id, h.crop_id, c.name crop_name, h.harvest_date, CAST(h.quantity AS TEXT) quantity, CASE WHEN h.gross_weight_kg IS NULL THEN NULL ELSE CAST(h.gross_weight_kg AS TEXT) END gross_weight_kg, CAST(h.net_weight_kg AS TEXT) net_weight_kg, CASE WHEN h.average_weight_kg IS NULL THEN NULL ELSE CAST(h.average_weight_kg AS TEXT) END average_weight_kg, h.sale_price_paise_per_kg, h.calculated_revenue_paise, h.actual_revenue_paise, h.revenue_override_reason, h.buyer, h.notes, h.source, h.source_sheet, h.source_row, h.import_fingerprint FROM harvests h JOIN crops c ON c.id = h.crop_id WHERE h.source = 'EXCEL' AND h.source_sheet = 'Banana Harvest Details' ORDER BY h.source_row`);
   const databaseHarvests = rawDatabaseHarvests.map((row) => ({
     ...row,
     quantity: storedDecimal(row.quantity),
     gross_weight_kg: row.gross_weight_kg === null ? null : storedDecimal(row.gross_weight_kg),
     net_weight_kg: storedDecimal(row.net_weight_kg),
+    average_weight_kg: row.average_weight_kg === null ? null : storedDecimal(row.average_weight_kg),
   }));
   const checks: VerificationCheck[] = [projectionCheck("expense exact projection", source.expenses, databaseExpenses), projectionCheck("plantation exact projection", source.plantation, databasePlantation), projectionCheck("harvest exact projection", source.harvests, databaseHarvests)];
   const databaseControls = { expenseCount: databaseExpenses.length, expenseTotalPaise: databaseExpenses.reduce((sum, row) => sum + Number(row.amount_paise), 0), satishPaise: databaseExpenses.filter((row) => row.paid_by_person_id === "person_satish").reduce((sum, row) => sum + Number(row.amount_paise), 0), maheshPaise: databaseExpenses.filter((row) => row.paid_by_person_id === "person_mahesh").reduce((sum, row) => sum + Number(row.amount_paise), 0), settlementPaise: 0, plantationTotal: databasePlantation.reduce((sum, row) => sum + Number(row.quantity), 0), harvestRevenuePaise: rawDatabaseHarvests.reduce((sum, row) => sum + Number(row.actual_revenue_paise), 0) };

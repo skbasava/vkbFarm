@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { normalizeWorkbook } from "../../scripts/normalize-excel";
+import { normalizeWorkbook, normalizeWorkbookSource } from "../../scripts/normalize-excel";
+import { validateWorkbookPath } from "../../scripts/source-policy";
 import { sourceControls } from "../../scripts/verify-import";
 
 const fixture = path.resolve("tests/fixtures/farm-import.xlsx");
@@ -109,6 +110,17 @@ describe("farm workbook parser", () => {
       expect.objectContaining({ field: "category", from: "Food ", to: "Food" }),
       expect.objectContaining({ field: "crop", from: "Bannana", to: "Banana" }),
     ]));
+  });
+
+  it("parses the exact immutable bytes that were checksummed even if the pathname changes", async () => {
+    const sourcePath = await workbookVariant(() => undefined);
+    const source = await validateWorkbookPath(sourcePath, { allowUnapprovedSource: true });
+    await fs.writeFile(sourcePath, "replacement that is not an xlsx workbook");
+
+    const plan = normalizeWorkbookSource(source);
+    expect(plan.sourceChecksum).toBe(source.checksum);
+    expect(plan.expenses).toHaveLength(2);
+    expect(plan.harvests).toHaveLength(3);
   });
 
   it("discovers unique exact header tuples anywhere in each full used range", async () => {
@@ -226,7 +238,63 @@ describe("farm workbook parser", () => {
     });
     const relocatedPlan = await normalizeWorkbook(relocatedDetail, { allowUnapprovedSource: true });
     expect(relocatedPlan.expenses[0]).toMatchObject({ paidTo: "Vendor B", enrichmentSource: { row: 5 } });
-    expect(relocatedPlan.expenses[0].importFingerprint).not.toBe((await normalizeFixture()).expenses[0].importFingerprint);
+    expect(relocatedPlan.expenses[0].importFingerprint).toBe((await normalizeFixture()).expenses[0].importFingerprint);
+  });
+
+  it("requires a global one-ledger-to-one-detail match before applying enrichment", async () => {
+    const duplicateLedger = await workbookVariant((workbook) => {
+      const sheet = workbook.Sheets["Common Expense"];
+      for (let column = 0; column < 5; column += 1) {
+        const source = sheet[XLSX.utils.encode_cell({ r: 3, c: column })];
+        if (source) sheet[XLSX.utils.encode_cell({ r: 7, c: column })] = { ...source };
+      }
+      sheet["!ref"] = "A1:E8";
+    });
+    const oneDetail = await normalizeWorkbook(duplicateLedger, { allowUnapprovedSource: true });
+    expect(oneDetail.expenses.filter((row) => [4, 8].includes(row.sourceRow))).toEqual([
+      expect.objectContaining({ sourceRow: 4, paidTo: null, notes: null, enrichmentSource: null }),
+      expect.objectContaining({ sourceRow: 8, paidTo: null, notes: null, enrichmentSource: null }),
+    ]);
+    expect(oneDetail.warnings.filter((issue) => issue.code === "AMBIGUOUS_DETAIL_MATCH").map((issue) => issue.row)).toEqual([4, 8]);
+    expect(sourceControls(XLSX.readFile(duplicateLedger, { cellFormula: true, raw: true })).expenses
+      .filter((row) => [4, 8].includes(Number(row.source_row))))
+      .toEqual([
+        expect.objectContaining({ source_row: 4, paid_to: null, notes: null, enrichment_source_json: null }),
+        expect.objectContaining({ source_row: 8, paid_to: null, notes: null, enrichment_source_json: null }),
+      ]);
+
+    const manyToMany = await workbookVariant((workbook) => {
+      const ledger = workbook.Sheets["Common Expense"];
+      for (let column = 0; column < 5; column += 1) {
+        const source = ledger[XLSX.utils.encode_cell({ r: 3, c: column })];
+        if (source) ledger[XLSX.utils.encode_cell({ r: 7, c: column })] = { ...source };
+      }
+      ledger["!ref"] = "A1:E8";
+      const detail = workbook.Sheets["Mah-Expense-Log"];
+      for (let column = 0; column < 8; column += 1) {
+        const source = detail[XLSX.utils.encode_cell({ r: 2, c: column })];
+        if (source) detail[XLSX.utils.encode_cell({ r: 4, c: column })] = { ...source };
+      }
+      detail["!ref"] = "A1:H5";
+    });
+    const ambiguous = await normalizeWorkbook(manyToMany, { allowUnapprovedSource: true });
+    expect(ambiguous.expenses.filter((row) => [4, 8].includes(row.sourceRow)).every((row) => row.enrichmentSource === null)).toBe(true);
+    expect(ambiguous.warnings.filter((issue) => issue.code === "AMBIGUOUS_DETAIL_MATCH").map((issue) => issue.row)).toEqual([4, 8]);
+  });
+
+  it("logs payer whitespace trimming and keeps independent verification aligned", async () => {
+    const whitespacePayer = await workbookVariant((workbook) => {
+      workbook.Sheets["Common Expense"].D4.v = " mahesh ";
+    });
+    const plan = await normalizeWorkbook(whitespacePayer, { allowUnapprovedSource: true });
+    expect(plan.expenses[0]).toMatchObject({ paidByPersonId: "person_mahesh", enrichmentSource: expect.any(Object) });
+    expect(plan.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "paidBy", from: " mahesh ", to: "mahesh", rule: "payer-trim" }),
+      expect.objectContaining({ field: "paidBy", from: "mahesh", to: "Mahesh", rule: "person-case:mahesh" }),
+    ]));
+    expect(sourceControls(XLSX.readFile(whitespacePayer, { cellFormula: true, raw: true })).expenses).toEqual(
+      expect.arrayContaining([expect.objectContaining({ source_row: 4, paid_by_person_id: "person_mahesh", paid_to: "Vendor B" })]),
+    );
   });
 
   it("counts warning-skipped invalid plantation contributions and requires harvest Grand Total", async () => {

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
-import { normalizeWorkbook } from "./normalize-excel";
+import { normalizeWorkbookSource } from "./normalize-excel";
 import { CANONICAL_WORKBOOK_NAME, CANONICAL_WORKBOOK_SHA256, canonicalizePotentialPath, validateWorkbookPath, workbookChecksum } from "./source-policy";
 import type { ImportDatabase, ImportPlan, SqlStatement } from "./types";
 
@@ -45,6 +45,7 @@ export type ImportArguments = {
 export type ImportResult = {
   dryRun: boolean;
   inserted: { categories: number; crops: number; expenses: number; plantation: number; harvests: number };
+  backfilled: { expenseEnrichmentProvenance: number };
   duplicates: number;
   accepted: { expenses: number; plantation: number; harvests: number };
   skipped: number;
@@ -203,26 +204,73 @@ function existingFingerprints(rows: Array<{ import_fingerprint: unknown }>): Set
   return new Set(rows.map((row) => row.import_fingerprint).filter((value): value is string => typeof value === "string"));
 }
 
+type ExistingExpense = {
+  id: string;
+  expense_date: string;
+  description: string;
+  amount_paise: number;
+  paid_by_person_id: string;
+  category_name: string;
+  expense_class: string | null;
+  paid_to: string | null;
+  notes: string | null;
+  crop_id: string | null;
+  is_shared: number;
+  source: string | null;
+  source_sheet: string | null;
+  source_row: number | null;
+  import_fingerprint: string;
+  enrichment_source_json: string | null;
+  deleted_at: string | null;
+};
+
+function expenseMatchesPlan(row: ExistingExpense, expense: ImportPlan["expenses"][number]): boolean {
+  return row.id === expense.id
+    && row.expense_date === expense.expenseDate
+    && row.description === expense.description
+    && row.amount_paise === expense.amountPaise
+    && row.paid_by_person_id === expense.paidByPersonId
+    && row.category_name === expense.categoryName
+    && row.expense_class === null
+    && row.paid_to === expense.paidTo
+    && row.notes === expense.notes
+    && row.crop_id === null
+    && row.is_shared === 1
+    && row.source === expense.source
+    && row.source_sheet === expense.sourceSheet
+    && row.source_row === expense.sourceRow
+    && row.import_fingerprint === expense.importFingerprint
+    && row.deleted_at === null;
+}
+
 function sourceNotes(sources: ImportPlan["plantation"][number]["sources"]): string {
   return `Imported aggregate from ${sources.map((source) => `${source.sheet}!${source.column}${source.row}`).join(", ")}`;
 }
 
-export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan): Promise<Pick<ImportResult, "inserted" | "duplicates">> {
+export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan): Promise<Pick<ImportResult, "inserted" | "backfilled" | "duplicates">> {
   const [expenseRows, plantationRows, harvestRows, categoryRows, cropRows] = await Promise.all([
-    database.query<{ import_fingerprint: unknown }>("SELECT import_fingerprint FROM expenses WHERE import_fingerprint IS NOT NULL"),
+    database.query<ExistingExpense>(`SELECT
+      e.id, e.expense_date, e.description, e.amount_paise, e.paid_by_person_id,
+      c.name category_name, e.expense_class, e.paid_to, e.notes, e.crop_id,
+      e.is_shared, e.source, e.source_sheet, e.source_row, e.import_fingerprint,
+      e.enrichment_source_json, e.deleted_at
+      FROM expenses e
+      LEFT JOIN expense_categories c ON c.id = e.category_id
+      WHERE e.import_fingerprint IS NOT NULL`),
     database.query<{ import_fingerprint: unknown }>("SELECT import_fingerprint FROM plantation_inventory WHERE import_fingerprint IS NOT NULL"),
     database.query<{ import_fingerprint: unknown }>("SELECT import_fingerprint FROM harvests WHERE import_fingerprint IS NOT NULL"),
     database.query<{ id: string; normalized_name: string }>("SELECT id, normalized_name FROM expense_categories"),
     database.query<{ id: string; normalized_name: string }>("SELECT id, normalized_name FROM crops"),
   ]);
-  const existingExpenses = existingFingerprints(expenseRows);
+  const existingExpenses = new Map(expenseRows.map((row) => [row.import_fingerprint, row]));
   const existingPlantation = existingFingerprints(plantationRows);
   const existingHarvests = existingFingerprints(harvestRows);
   const categoryIds = new Map(categoryRows.map((row) => [row.normalized_name, row.id]));
   const cropIds = new Map(cropRows.map((row) => [row.normalized_name, row.id]));
   const statements: SqlStatement[] = [];
-  const statementKinds: Array<keyof ImportResult["inserted"]> = [];
+  const statementKinds: Array<keyof ImportResult["inserted"] | "expenseEnrichmentProvenance"> = [];
   const inserted = { categories: 0, crops: 0, expenses: 0, plantation: 0, harvests: 0 };
+  const backfilled = { expenseEnrichmentProvenance: 0 };
 
   for (const category of plan.categories) {
     if (categoryIds.has(category.normalizedName)) continue;
@@ -249,7 +297,26 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
 
   const now = new Date().toISOString();
   for (const expense of plan.expenses) {
-    if (existingExpenses.has(expense.importFingerprint)) continue;
+    const existing = existingExpenses.get(expense.importFingerprint);
+    if (existing) {
+      if (!expenseMatchesPlan(existing, expense)) {
+        throw new Error(`Existing imported expense ${expense.importFingerprint} does not match the workbook projection`);
+      }
+      const enrichmentSource = expense.enrichmentSource ? JSON.stringify(expense.enrichmentSource) : null;
+      if (existing.enrichment_source_json !== enrichmentSource) {
+        if (existing.enrichment_source_json !== null || enrichmentSource === null) {
+          throw new Error(`Existing imported expense ${expense.importFingerprint} has conflicting enrichment provenance`);
+        }
+        statements.push({
+          sql: `UPDATE expenses
+            SET enrichment_source_json = ?, updated_at = ?
+            WHERE id = ? AND import_fingerprint = ? AND enrichment_source_json IS NULL`,
+          params: [enrichmentSource, now, existing.id, expense.importFingerprint],
+        });
+        statementKinds.push("expenseEnrichmentProvenance");
+      }
+      continue;
+    }
     const categoryId = categoryIds.get(expense.categoryName.toLocaleLowerCase("en-IN"));
     if (!categoryId) throw new Error("Import plan category dependency is missing");
     statements.push({
@@ -295,10 +362,14 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
   }
 
   const changes = await database.batch(statements);
-  changes.forEach((count, index) => { inserted[statementKinds[index]] += count; });
+  changes.forEach((count, index) => {
+    const kind = statementKinds[index];
+    if (kind === "expenseEnrichmentProvenance") backfilled.expenseEnrichmentProvenance += count;
+    else inserted[kind] += count;
+  });
   const duplicates = plan.duplicates + plan.expenses.length + plan.plantation.length + plan.harvests.length
     - inserted.expenses - inserted.plantation - inserted.harvests;
-  return { inserted, duplicates };
+  return { inserted, backfilled, duplicates };
 }
 
 async function validateIssueReportPath(errorsPath: string, sourcePath: string, persistTo?: string): Promise<string> {
@@ -361,13 +432,14 @@ export async function importWorkbook(options: { workbookPath: string; dryRun: bo
   const source = await validateWorkbookPath(options.workbookPath, { allowUnapprovedSource: options.allowUnapprovedSource });
   const errorsPath = await validateIssueReportPath(options.errorsPath, source.absolutePath, options.localDb);
   if (options.localDb) await prepareLocalPersistenceDirectory(options.localDb, [source.absolutePath, errorsPath]);
-  const plan = await normalizeWorkbook(source.absolutePath, { allowUnapprovedSource: options.allowUnapprovedSource });
+  const plan = normalizeWorkbookSource(source);
   await writeIssueReport(plan, errorsPath);
   const accepted = { expenses: plan.expenses.length, plantation: plan.plantation.length, harvests: plan.harvests.length };
   if (options.dryRun) {
     return {
       dryRun: true,
       inserted: { categories: 0, crops: 0, expenses: 0, plantation: 0, harvests: 0 },
+      backfilled: { expenseEnrichmentProvenance: 0 },
       duplicates: plan.duplicates,
       accepted,
       skipped: plan.skipped,
