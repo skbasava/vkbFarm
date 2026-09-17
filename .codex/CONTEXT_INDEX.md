@@ -18,6 +18,7 @@
 - `src/features/dashboard/`, `src/features/reports/` — dashboard/report queries, responsive views, filters, charts, and tests.
 - `src/features/plantation/` — reviewed plantation summaries, cohort forms/editing, responsive matrix/cards, and paginated reference loading.
 - `src/features/harvest/` — reviewed harvest filters, exact revenue forms, responsive summaries/charts, legacy-date disclosure, and tests.
+- `src/features/documents/` — reviewed private receipt list/upload/preview/delete experience with expense handoff and role-aware states.
 - `src/lib/api-client.ts`, `format.ts`, `identity.ts`, `query-keys.ts` — shared API, display, identity, and query contracts.
 
 ## Backend
@@ -31,6 +32,7 @@
 - `worker/validation/plantation.ts`, `worker/repositories/plantation-repository.ts`, `worker/services/plantation-service.ts`, `worker/routes/plantation.ts` — reviewed reference administration and distinct plantation-cohort APIs.
 - `worker/validation/harvests.ts`, `worker/repositories/harvest-repository.ts`, `worker/services/harvest-service.ts`, `worker/routes/harvests.ts`, `worker/utils/stored-integers.ts` — reviewed harvest CRUD/import boundary, exact revenue, and safe aggregate contracts.
 - `scripts/normalize-excel.ts`, `scripts/import-excel.ts`, `scripts/verify-import.ts`, `scripts/source-policy.ts` — reviewed local-only workbook normalization, migration, compatibility, and exact verification.
+- `worker/utils/r2-keys.ts`, `worker/repositories/document-repository.ts`, `worker/services/document-service.ts`, `worker/routes/documents.ts` — reviewed private R2 receipt lifecycle and audited document API.
 - `worker/validation/expenses.ts`, `worker/utils/money.ts`, `dates.ts` — input and representation invariants.
 
 ## Database
@@ -50,5 +52,5 @@
 
 ## Active checkpoint
 
-- `.codex/CURRENT_TASK.md` — exact Task 12 receipt/document implementation state. Load before touching source.
+- `.codex/CURRENT_TASK.md` — exact Task 13 settings implementation state. Load before touching source.
 - `git status --short`, `git diff --stat`, `git diff`, and `git log -5 --oneline` — current source-of-truth evidence.

@@ -93,3 +93,13 @@ Implemented checksum-approved local workbook normalization, dry-run/import/verif
 Relevant commits: `113805a`, `79ac2ec`, `794d4d9`, `fee6ad3`.
 
 Important outcome: the approved workbook imports exactly 394 expenses, 40 plantation aggregates, and 3 legacy harvest rows; all financial controls reconcile, and a repeat run performs zero writes while reporting 437 duplicates.
+
+---
+
+## 2026-09-17 — Secure receipt documents
+
+Implemented private R2 receipt keys, strict JPEG/PNG/PDF validation, compensated and audited R2/D1 upload/delete lifecycles, streamed authenticated reads, bounded document APIs, and a responsive Skyblue/Grey document shelf with progress, preview, retry, and expense integration.
+
+Relevant commits: `0e369b8`, `c187478`, `6a0d0d5`.
+
+Important outcome: object keys never reach clients; uploads are bound to a live expense and exact 10 MiB limit; failed metadata writes compensate R2; concurrent deletion records one audit; viewers retain read-only historical access.

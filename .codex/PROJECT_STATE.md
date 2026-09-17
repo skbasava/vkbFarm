@@ -26,11 +26,11 @@ One Worker serves the SPA and owns `/api/v1`. Routes delegate to middleware, ser
 
 ## Implemented
 
-Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, responsive shell, settlements, financial reporting, plantation inventory, exact harvest tracking, and the conservative Excel migration are committed through `fee6ad3`. Financial aggregates are range-checked, legacy undated records are preserved, and the approved workbook imports locally with exact provenance-aware verification and cross-version idempotency.
+Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, responsive shell, settlements, financial reporting, plantation inventory, exact harvest tracking, conservative Excel migration, and private receipt documents are committed through `6a0d0d5`. Financial aggregates are range-checked, the workbook imports with exact provenance, and receipts have compensated R2/D1 lifecycle handling with audited private access.
 
 ## In progress
 
-Task 12 secure R2 receipt storage and the document experience are next. See `.codex/CURRENT_TASK.md` for the exact first action.
+Task 13 settings and administrative configuration are next. See `.codex/CURRENT_TASK.md` for the exact first action.
 
 ## Important constraints
 
@@ -42,15 +42,15 @@ Task 12 secure R2 receipt storage and the document experience are next. See `.co
 
 ## Known issues
 
-- Receipt upload/document routes, settings, and final production/PWA work are still plan tasks.
+- Settings and final production/PWA/browser acceptance work are still plan tasks.
 - The importer replaced the stale parser with maintained SheetJS CE 0.20.3. Six high development-only findings remain in the Cloudflare toolchain; production audit was clean in the last authoritative run.
 
 ## Current priorities
 
-1. Implement and review secure receipt storage and documents.
-2. Implement settings and administration.
-3. Complete PWA, deployment, browser, and final acceptance work.
+1. Implement and review settings and administration.
+2. Complete PWA, deployment, browser, and final acceptance work.
+3. Run whole-branch review and prepare integration options.
 
 ## Last updated
 
-2026-09-17 — Task 11 Excel migration passed review and controller verification; Task 12 receipts/documents is next.
+2026-09-17 — Task 12 receipts/documents passed review and controller verification; Task 13 settings is next.
