@@ -10,7 +10,7 @@ import {
   useSettingsCategories,
   useSettingsMutationPending,
 } from "./api";
-import { errorMessage } from "./errors";
+import { errorMessage, fieldErrorsFromApi } from "./errors";
 import {
   FormActions,
   FormDialog,
@@ -28,25 +28,28 @@ function CategoryForm({ category, onClose }: { category?: SettingsCategory; onCl
   const [name, setName] = useState(category?.name ?? "");
   const [expenseClass, setExpenseClass] = useState<ExpenseClass | "">(category?.defaultExpenseClass ?? "");
   const [active, setActive] = useState(category?.active ?? true);
-  const [nameError, setNameError] = useState("");
+  const [clientNameError, setClientNameError] = useState("");
+  const nameError = clientNameError || fieldErrorsFromApi(mutation.error, ["name"] as const).name;
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    mutation.reset();
     if (!name.trim()) {
-      setNameError("Category name is required");
+      setClientNameError("Category name is required");
       return;
     }
-    const input: CategoryInput = {
+    setClientNameError("");
+    const input: Partial<CategoryInput> = {
       name: name.trim(),
       defaultExpenseClass: expenseClass || null,
-      active,
     };
+    if (!category) input.active = active;
     mutation.mutate({ id: category?.id, input }, { onSuccess: onClose });
   }
 
   return (
     <form className="settings-form" onSubmit={submit}>
-      <Field autoFocus error={nameError} label="Category name" onChange={(event) => setName(event.target.value)} value={name} />
+      <Field autoFocus error={nameError} label="Category name" maxLength={120} onChange={(event) => setName(event.target.value)} value={name} />
       <label className="settings-select-field">
         <span>Default expense class</span>
         <select aria-label="Default expense class" onChange={(event) => setExpenseClass(event.target.value as ExpenseClass | "")} value={expenseClass}>

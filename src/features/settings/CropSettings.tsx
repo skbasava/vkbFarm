@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "../../components/ui/button";
 import { Field } from "../../components/ui/field";
 import { type CropInput, type SettingsCrop, useCropMutation, useSettingsCrops, useSettingsMutationPending } from "./api";
-import { errorMessage } from "./errors";
+import { errorMessage, fieldErrorsFromApi } from "./errors";
 import { FormActions, FormDialog, ReadOnlyNotice, RecordStatus, SectionHeading, SettingsEmpty, SettingsLoadError, SettingsLoading, StatusDialog } from "./SettingsSection";
 
 function CropForm({ crop, onClose }: { crop?: SettingsCrop; onClose: () => void }) {
@@ -12,21 +12,26 @@ function CropForm({ crop, onClose }: { crop?: SettingsCrop; onClose: () => void 
   const [localName, setLocalName] = useState(crop?.localName ?? "");
   const [cropType, setCropType] = useState(crop?.cropType ?? "");
   const [active, setActive] = useState(crop?.active ?? true);
-  const [nameError, setNameError] = useState("");
+  const [clientNameError, setClientNameError] = useState("");
+  const serverErrors = fieldErrorsFromApi(mutation.error, ["name", "localName", "cropType"] as const);
+  const nameError = clientNameError || serverErrors.name;
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!name.trim()) { setNameError("Crop name is required"); return; }
-    const input: CropInput = { name: name.trim(), localName: localName.trim() || null, cropType: cropType.trim() || null, active };
+    mutation.reset();
+    if (!name.trim()) { setClientNameError("Crop name is required"); return; }
+    setClientNameError("");
+    const input: Partial<CropInput> = { name: name.trim(), localName: localName.trim() || null, cropType: cropType.trim() || null };
+    if (!crop) input.active = active;
     mutation.mutate({ id: crop?.id, input }, { onSuccess: onClose });
   }
 
   return (
     <form className="settings-form" onSubmit={submit}>
       <div className="settings-form__grid">
-        <Field autoFocus error={nameError} label="Crop name" onChange={(event) => setName(event.target.value)} value={name} />
-        <Field label="Local name" onChange={(event) => setLocalName(event.target.value)} value={localName} />
-        <Field label="Crop type" onChange={(event) => setCropType(event.target.value)} placeholder="For example: fruit or timber" value={cropType} />
+        <Field autoFocus error={nameError} label="Crop name" maxLength={120} onChange={(event) => setName(event.target.value)} value={name} />
+        <Field error={serverErrors.localName} label="Local name" maxLength={120} onChange={(event) => setLocalName(event.target.value)} value={localName} />
+        <Field error={serverErrors.cropType} label="Crop type" maxLength={120} onChange={(event) => setCropType(event.target.value)} placeholder="For example: fruit or timber" value={cropType} />
       </div>
       {!crop ? <label className="settings-check"><input checked={active} onChange={(event) => setActive(event.target.checked)} type="checkbox" /><span><strong>Active crop</strong><small>Available for new plantation and expense records.</small></span></label> : null}
       <p className="settings-form__note">Renaming changes the current crop label shown wherever this reference is joined to historical data.</p>

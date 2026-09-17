@@ -64,13 +64,13 @@ export function SettingsPage() {
             </button>
           ))}
         </nav>
-        <main className="settings-workspace" key={activeSection}>
+        <section aria-label="Settings workspace" className="settings-workspace" key={activeSection}>
           {activeSection === "people" ? <PeopleSettings canAdmin={canAdmin} /> : null}
           {activeSection === "categories" ? <CategorySettings canAdmin={canAdmin} /> : null}
           {activeSection === "crops" ? <CropSettings canAdmin={canAdmin} /> : null}
           {activeSection === "areas" ? <FarmAreaSettings canAdmin={canAdmin} /> : null}
           {activeSection === "application" ? <ApplicationSettings identity={identity.data} /> : null}
-        </main>
+        </section>
       </div>
     </div>
   );

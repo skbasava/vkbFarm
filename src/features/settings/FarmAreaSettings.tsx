@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "../../components/ui/button";
 import { Field } from "../../components/ui/field";
 import { type FarmAreaInput, type SettingsFarmArea, useFarmAreaMutation, useSettingsFarmAreas, useSettingsMutationPending } from "./api";
-import { errorMessage } from "./errors";
+import { errorMessage, fieldErrorsFromApi } from "./errors";
 import { FormActions, FormDialog, ReadOnlyNotice, RecordStatus, SectionHeading, SettingsEmpty, SettingsLoadError, SettingsLoading, StatusDialog } from "./SettingsSection";
 
 function FarmAreaForm({ area, onClose }: { area?: SettingsFarmArea; onClose: () => void }) {
@@ -12,25 +12,31 @@ function FarmAreaForm({ area, onClose }: { area?: SettingsFarmArea; onClose: () 
   const [name, setName] = useState(area?.name ?? "");
   const [description, setDescription] = useState(area?.description ?? "");
   const [active, setActive] = useState(area?.active ?? true);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  const errors = {
+    ...fieldErrorsFromApi(mutation.error, ["code", "name", "description"] as const),
+    ...clientErrors,
+  };
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    mutation.reset();
     const nextErrors: Record<string, string> = {};
     if (!code.trim()) nextErrors.code = "Area code is required";
     if (!name.trim()) nextErrors.name = "Area name is required";
-    setErrors(nextErrors);
+    setClientErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
-    const input: FarmAreaInput = { code: code.trim(), name: name.trim(), description: description.trim() || null, active };
+    const input: Partial<FarmAreaInput> = { code: code.trim(), name: name.trim(), description: description.trim() || null };
+    if (!area) input.active = active;
     mutation.mutate({ id: area?.id, input }, { onSuccess: onClose });
   }
 
   return (
     <form className="settings-form" onSubmit={submit}>
       <div className="settings-form__grid">
-        <Field autoFocus error={errors.code} label="Area code" onChange={(event) => setCode(event.target.value)} value={code} />
-        <Field error={errors.name} label="Area name" onChange={(event) => setName(event.target.value)} value={name} />
-        <Field label="Description" onChange={(event) => setDescription(event.target.value)} value={description} />
+        <Field autoFocus error={errors.code} label="Area code" maxLength={40} onChange={(event) => setCode(event.target.value)} value={code} />
+        <Field error={errors.name} label="Area name" maxLength={120} onChange={(event) => setName(event.target.value)} value={name} />
+        <Field error={errors.description} label="Description" maxLength={500} onChange={(event) => setDescription(event.target.value)} value={description} />
       </div>
       {!area ? <label className="settings-check"><input checked={active} onChange={(event) => setActive(event.target.checked)} type="checkbox" /><span><strong>Active farm area</strong><small>Available for new plantation records.</small></span></label> : null}
       <p className="settings-form__note">Renaming changes the current area label shown on historical records. Existing records remain retained.</p>

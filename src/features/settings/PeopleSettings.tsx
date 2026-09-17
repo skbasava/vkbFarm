@@ -10,7 +10,7 @@ import {
   useSettingsMutationPending,
   useSettingsPeople,
 } from "./api";
-import { errorMessage } from "./errors";
+import { errorMessage, fieldErrorsFromApi } from "./errors";
 import {
   FormActions,
   FormDialog,
@@ -36,24 +36,29 @@ function PersonForm({ onClose, person }: PersonFormProps) {
   const [appRole, setAppRole] = useState<AppRole>(person?.appRole ?? "viewer");
   const [shared, setShared] = useState(person?.participatesInSharedExpenses ?? true);
   const [active, setActive] = useState(person?.active ?? true);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  const errors = {
+    ...fieldErrorsFromApi(mutation.error, ["name", "email", "farmRole"] as const),
+    ...clientErrors,
+  };
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    mutation.reset();
     const nextErrors: Record<string, string> = {};
     if (!name.trim()) nextErrors.name = "Name is required";
     if (!farmRole.trim()) nextErrors.farmRole = "Farm role is required";
-    setErrors(nextErrors);
+    setClientErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
-    const input: PersonInput = {
+    const input: Partial<PersonInput> = {
       name: name.trim(),
       email: email.trim() || null,
       farmRole: farmRole.trim(),
       appRole,
       participatesInSharedExpenses: shared,
-      active,
     };
+    if (!person) input.active = active;
     mutation.mutate(
       { id: person?.id, input },
       { onSuccess: onClose },
@@ -63,9 +68,9 @@ function PersonForm({ onClose, person }: PersonFormProps) {
   return (
     <form className="settings-form" onSubmit={submit}>
       <div className="settings-form__grid">
-        <Field autoFocus error={errors.name} label="Name" onChange={(event) => setName(event.target.value)} value={name} />
+        <Field autoFocus error={errors.name} label="Name" maxLength={120} onChange={(event) => setName(event.target.value)} value={name} />
         <Field error={errors.email} label="Email" onChange={(event) => setEmail(event.target.value)} placeholder="Optional for non-login participants" type="email" value={email} />
-        <Field error={errors.farmRole} hint="For example: owner, manager, worker" label="Farm role" onChange={(event) => setFarmRole(event.target.value)} value={farmRole} />
+        <Field error={errors.farmRole} hint="For example: owner, manager, worker" label="Farm role" maxLength={80} onChange={(event) => setFarmRole(event.target.value)} value={farmRole} />
         <label className="settings-select-field">
           <span>Application role</span>
           <select aria-label="Application role" onChange={(event) => setAppRole(event.target.value as AppRole)} value={appRole}>

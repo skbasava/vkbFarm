@@ -53,15 +53,18 @@ function ok(data: unknown, meta?: { page: number; pageSize: number; total: numbe
   return Promise.resolve(new Response(JSON.stringify(meta ? { data, meta } : { data }), { status: 200 }));
 }
 
-function failure(status: number, code: string, message: string) {
-  return Promise.resolve(new Response(JSON.stringify({ error: { code, message } }), { status }));
+function failure(status: number, code: string, message: string, details?: Record<string, unknown>) {
+  return Promise.resolve(new Response(JSON.stringify({ error: { code, message, ...(details ? { details } : {}) } }), { status }));
 }
 
-function installFetch(role: Role = "admin") {
+function installFetch(
+  role: Role = "admin",
+  writeResponse: (url: string, init: RequestInit) => Promise<Response> = () => ok({ id: "saved" }),
+) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
     if (url === "/api/v1/identity") return ok({ email: `${role}@vkb.test`, role });
-    if (init?.method === "POST" || init?.method === "PATCH") return ok({ id: "saved" });
+    if (init?.method === "POST" || init?.method === "PATCH") return writeResponse(url, init);
     if (url.startsWith("/api/v1/people?")) return ok([person], { page: 1, pageSize: 100, total: 1 });
     if (url.startsWith("/api/v1/categories?")) return ok([category], { page: 1, pageSize: 100, total: 1 });
     if (url.startsWith("/api/v1/plantation/crops?")) return ok([crop], { page: 1, pageSize: 100, total: 1 });
@@ -99,6 +102,7 @@ describe("SettingsPage", () => {
 
     expect(await screen.findByRole("heading", { name: "People" })).toBeVisible();
     expect(screen.getByRole("region", { name: "People" })).toBeVisible();
+    expect(screen.queryByRole("main")).not.toBeInTheDocument();
     const navigation = screen.getByRole("navigation", { name: "Settings sections" });
     expect(within(navigation).getAllByRole("button")).toHaveLength(5);
     const peopleTab = within(navigation).getByRole("button", { name: "People" });
@@ -178,6 +182,77 @@ describe("SettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "Add person" }));
     fireEvent.click(cropSection);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("omits active from an ordinary person edit PATCH", async () => {
+    const fetchSpy = installFetch();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Edit Satish" }));
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Satish Kumar");
+    await user.click(screen.getByRole("button", { name: "Save person" }));
+
+    await waitFor(() => expect(requestBody(fetchSpy, "/api/v1/people/person-1", "PATCH")).toEqual({
+      name: "Satish Kumar",
+      email: "satish@vkb.test",
+      farmRole: "owner",
+      appRole: "admin",
+      participatesInSharedExpenses: true,
+    }));
+  });
+
+  it("omits active from an ordinary category edit PATCH", async () => {
+    const fetchSpy = installFetch();
+    const user = userEvent.setup();
+    renderPage();
+    const navigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    await user.click(within(navigation).getByRole("button", { name: "Expense Categories" }));
+    await user.click(await screen.findByRole("button", { name: "Edit Farm labour" }));
+    await user.clear(screen.getByLabelText("Category name"));
+    await user.type(screen.getByLabelText("Category name"), "Field labour");
+    await user.click(screen.getByRole("button", { name: "Save category" }));
+
+    await waitFor(() => expect(requestBody(fetchSpy, "/api/v1/categories/category-1", "PATCH")).toEqual({
+      name: "Field labour",
+      defaultExpenseClass: "OPEX",
+    }));
+  });
+
+  it("omits active from an ordinary crop edit PATCH", async () => {
+    const fetchSpy = installFetch();
+    const user = userEvent.setup();
+    renderPage();
+    const navigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    await user.click(within(navigation).getByRole("button", { name: "Crops" }));
+    await user.click(await screen.findByRole("button", { name: "Edit Banana" }));
+    await user.clear(screen.getByLabelText("Crop type"));
+    await user.type(screen.getByLabelText("Crop type"), "Perennial fruit");
+    await user.click(screen.getByRole("button", { name: "Save crop" }));
+
+    await waitFor(() => expect(requestBody(fetchSpy, "/api/v1/plantation/crops/crop-1", "PATCH")).toEqual({
+      name: "Banana",
+      localName: "Baale",
+      cropType: "Perennial fruit",
+    }));
+  });
+
+  it("omits active from an ordinary farm-area edit PATCH", async () => {
+    const fetchSpy = installFetch();
+    const user = userEvent.setup();
+    renderPage();
+    const navigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    await user.click(within(navigation).getByRole("button", { name: "Farm Areas" }));
+    await user.click(await screen.findByRole("button", { name: "Edit MT" }));
+    await user.clear(screen.getByLabelText("Description"));
+    await user.type(screen.getByLabelText("Description"), "North and east field");
+    await user.click(screen.getByRole("button", { name: "Save farm area" }));
+
+    await waitFor(() => expect(requestBody(fetchSpy, "/api/v1/plantation/farm-areas/area-1", "PATCH")).toEqual({
+      code: "MT",
+      name: "Main tract",
+      description: "North and east field",
+    }));
   });
 
   it("submits category, crop, and farm-area payloads with nullable optional values", async () => {
@@ -298,6 +373,100 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("An expense category with this name already exists");
     expect(screen.getByRole("dialog", { name: "Add expense category" })).toBeVisible();
     expect(screen.getByLabelText("Category name")).toHaveValue("Farm labour");
+  });
+
+  it("associates authoritative person issues with bounded inputs and preserves the edit", async () => {
+    installFetch("admin", (url) => url === "/api/v1/people/person-1"
+      ? failure(422, "VALIDATION_ERROR", "The person input is invalid", { issues: [{ path: "farmRole", message: "Farm role must be at most 80 characters" }] })
+      : ok({ id: "saved" }));
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Edit Satish" }));
+    const nameInput = screen.getByLabelText("Name");
+    const farmRoleInput = screen.getByLabelText("Farm role");
+    expect(nameInput).toHaveAttribute("maxlength", "120");
+    expect(farmRoleInput).toHaveAttribute("maxlength", "80");
+    await user.clear(farmRoleInput);
+    await user.type(farmRoleInput, "estate manager");
+    await user.click(screen.getByRole("button", { name: "Save person" }));
+
+    expect(await screen.findByText("Farm role must be at most 80 characters")).toBeVisible();
+    expect(farmRoleInput).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById(farmRoleInput.getAttribute("aria-describedby")!)).toHaveTextContent("Farm role must be at most 80 characters");
+    expect(farmRoleInput).toHaveValue("estate manager");
+    expect(screen.getByRole("alert")).toHaveTextContent("The person input is invalid");
+    expect(screen.getByRole("dialog", { name: "Edit Satish" })).toBeVisible();
+  });
+
+  it("associates authoritative category issues with its bounded name input", async () => {
+    installFetch("admin", (url) => url === "/api/v1/categories/category-1"
+      ? failure(422, "VALIDATION_ERROR", "The category input is invalid", { issues: [{ path: "name", message: "Category name must be at most 120 characters" }] })
+      : ok({ id: "saved" }));
+    const user = userEvent.setup();
+    renderPage();
+    const navigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    await user.click(within(navigation).getByRole("button", { name: "Expense Categories" }));
+    await user.click(await screen.findByRole("button", { name: "Edit Farm labour" }));
+    const input = screen.getByLabelText("Category name");
+    expect(input).toHaveAttribute("maxlength", "120");
+    await user.click(screen.getByRole("button", { name: "Save category" }));
+
+    expect(await screen.findByText("Category name must be at most 120 characters")).toBeVisible();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)).toHaveTextContent("Category name must be at most 120 characters");
+    expect(input).toHaveValue("Farm labour");
+    expect(screen.getByRole("alert")).toHaveTextContent("The category input is invalid");
+    expect(screen.getByRole("dialog", { name: "Edit Farm labour" })).toBeVisible();
+  });
+
+  it("associates authoritative crop issues with bounded optional inputs", async () => {
+    installFetch("admin", (url) => url === "/api/v1/plantation/crops/crop-1"
+      ? failure(422, "VALIDATION_ERROR", "The crop input is invalid", { issues: [{ path: "localName", message: "Local name must be at most 120 characters" }] })
+      : ok({ id: "saved" }));
+    const user = userEvent.setup();
+    renderPage();
+    const navigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    await user.click(within(navigation).getByRole("button", { name: "Crops" }));
+    await user.click(await screen.findByRole("button", { name: "Edit Banana" }));
+    const nameInput = screen.getByLabelText("Crop name");
+    const localNameInput = screen.getByLabelText("Local name");
+    const typeInput = screen.getByLabelText("Crop type");
+    expect(nameInput).toHaveAttribute("maxlength", "120");
+    expect(localNameInput).toHaveAttribute("maxlength", "120");
+    expect(typeInput).toHaveAttribute("maxlength", "120");
+    await user.click(screen.getByRole("button", { name: "Save crop" }));
+
+    expect(await screen.findByText("Local name must be at most 120 characters")).toBeVisible();
+    expect(localNameInput).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById(localNameInput.getAttribute("aria-describedby")!)).toHaveTextContent("Local name must be at most 120 characters");
+    expect(localNameInput).toHaveValue("Baale");
+    expect(screen.getByRole("alert")).toHaveTextContent("The crop input is invalid");
+    expect(screen.getByRole("dialog", { name: "Edit Banana" })).toBeVisible();
+  });
+
+  it("associates authoritative farm-area issues with bounded optional inputs", async () => {
+    installFetch("admin", (url) => url === "/api/v1/plantation/farm-areas/area-1"
+      ? failure(422, "VALIDATION_ERROR", "The farm area input is invalid", { issues: [{ path: "description", message: "Description must be at most 500 characters" }] })
+      : ok({ id: "saved" }));
+    const user = userEvent.setup();
+    renderPage();
+    const navigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    await user.click(within(navigation).getByRole("button", { name: "Farm Areas" }));
+    await user.click(await screen.findByRole("button", { name: "Edit MT" }));
+    const codeInput = screen.getByLabelText("Area code");
+    const nameInput = screen.getByLabelText("Area name");
+    const descriptionInput = screen.getByLabelText("Description");
+    expect(codeInput).toHaveAttribute("maxlength", "40");
+    expect(nameInput).toHaveAttribute("maxlength", "120");
+    expect(descriptionInput).toHaveAttribute("maxlength", "500");
+    await user.click(screen.getByRole("button", { name: "Save farm area" }));
+
+    expect(await screen.findByText("Description must be at most 500 characters")).toBeVisible();
+    expect(descriptionInput).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById(descriptionInput.getAttribute("aria-describedby")!)).toHaveTextContent("Description must be at most 500 characters");
+    expect(descriptionInput).toHaveValue("Northern field");
+    expect(screen.getByRole("alert")).toHaveTextContent("The farm area input is invalid");
+    expect(screen.getByRole("dialog", { name: "Edit MT" })).toBeVisible();
   });
 
   it("keeps a form dialog open while its save request is pending", async () => {
