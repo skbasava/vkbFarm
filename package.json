@@ -14,6 +14,7 @@
     "lint": "eslint . --max-warnings 0",
     "db:migrate:local": "wrangler d1 migrations apply vkb-farm-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply vkb-farm-db --remote",
+    "import:prepare": "tsx scripts/prepare-import-db.ts",
     "import:excel": "tsx scripts/import-excel.ts",
     "verify:import": "tsx scripts/verify-import.ts"
   },
@@ -25,6 +26,9 @@
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "dependencies": {
     "@hono/zod-validator": "^0.9.1",
     "@hookform/resolvers": "^5.9.1",

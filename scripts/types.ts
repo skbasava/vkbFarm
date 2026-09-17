@@ -19,6 +19,12 @@ export type ImportIssue = {
 
 export type SourceCell = { sheet: string; row: number; column: string };
 
+export type EnrichmentSource = {
+  sheet: "Sat-Expense Log" | "Mah-Expense-Log";
+  row: number;
+  cells: string[];
+};
+
 export type NormalizedCategory = {
   id: string;
   name: string;
@@ -35,6 +41,7 @@ export type NormalizedExpense = {
   categoryName: string;
   paidTo: string | null;
   notes: string | null;
+  enrichmentSource: EnrichmentSource | null;
   source: "EXCEL";
   sourceSheet: "Common Expense";
   sourceRow: number;
@@ -84,8 +91,10 @@ export type ImportPlan = {
   errors: ImportIssue[];
   discovered: Record<string, number>;
   duplicates: number;
+  skipped: number;
   sourceFile: string;
   sourceChecksum: string;
+  approvedSource: boolean;
 };
 
 export type SqlStatement = { sql: string; params?: Array<string | number | null> };
@@ -93,5 +102,5 @@ export type SqlStatement = { sql: string; params?: Array<string | number | null>
 export interface ImportDatabase {
   readonly persistTo: string;
   query<T extends Record<string, unknown> = Record<string, unknown>>(sql: string, params?: Array<string | number | null>): Promise<T[]>;
-  batch(statements: SqlStatement[]): Promise<void>;
+  batch(statements: SqlStatement[]): Promise<number[]>;
 }

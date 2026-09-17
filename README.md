@@ -10,7 +10,7 @@ Worker, with D1 for relational data and R2 for receipt files.
 
 ## Prerequisites
 
-- Node.js 20 or newer
+- Node.js 22.12 or newer
 - npm
 - A Cloudflare account is required only for remote deployment
 
@@ -30,12 +30,13 @@ environment binding with the created D1 database ID.
 
 The approved migration source is `data/VKB-Farm-Expense-tracker.xlsx`. Its SHA-256
 checksum is `655b77c344356bd9b201e616cf8c2766ec63495414c6673e02271471d5e8e67a`.
-The import command validates this checksum whenever that canonical filename is
-used. It never supports remote D1 and requires an explicit workbook path. A write
+The import command validates this checksum regardless of the supplied filename.
+It never supports remote D1 and requires an explicit workbook path. A write
 also requires a dedicated local persistence directory.
 
 ```bash
 npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --dry-run --errors /tmp/vkb-migration-errors.json
+npm run import:prepare -- --local-db /tmp/vkb-farm-import
 npm run db:migrate:local -- --persist-to /tmp/vkb-farm-import
 npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --local-db /tmp/vkb-farm-import --errors /tmp/vkb-migration-errors.json
 npm run verify:import -- data/VKB-Farm-Expense-tracker.xlsx --local-db /tmp/vkb-farm-import
@@ -45,6 +46,11 @@ Use a new dedicated persistence directory for a disposable import. Repeating the
 import against the same local directory skips every matching business fingerprint.
 `migration-errors.json` contains structured invalid-row evidence; the CLI prints
 only counts, the source filename, and its checksum.
+
+Every source must match the approved checksum. `--allow-unapproved-source` is an
+explicit fixture/testing override for dry runs, imports, and verification; results
+then report `approvedSource: false` and never claim approved baselines. Report
+paths must be JSON outside the repository, source, and local persistence directory.
 
 Later implementation slices add the complete production deployment instructions.
 

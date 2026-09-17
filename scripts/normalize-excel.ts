@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import * as nodeFs from "node:fs";
-import fs from "node:fs/promises";
-import path from "node:path";
 import * as XLSX from "xlsx";
 import { normalizeCategory, normalizeCrop, normalizePerson, parseLegacyDate } from "./data-normalization";
+import {
+  CANONICAL_WORKBOOK_NAME,
+  CANONICAL_WORKBOOK_SHA256,
+  validateWorkbookPath,
+  workbookChecksum,
+} from "./source-policy";
 import type {
   FormulaCache,
   ImportIssue,
@@ -16,8 +20,7 @@ import type {
   SourceCell,
 } from "./types";
 
-export const CANONICAL_WORKBOOK_NAME = "VKB-Farm-Expense-tracker.xlsx";
-export const CANONICAL_WORKBOOK_SHA256 = "655b77c344356bd9b201e616cf8c2766ec63495414c6673e02271471d5e8e67a";
+export { CANONICAL_WORKBOOK_NAME, CANONICAL_WORKBOOK_SHA256, validateWorkbookPath, workbookChecksum };
 XLSX.set_fs(nodeFs);
 
 type CellValue = XLSX.CellObject["v"] | XLSX.CellObject | null | undefined;
@@ -109,19 +112,48 @@ function requireSheet(workbook: XLSX.WorkBook, name: string): XLSX.WorkSheet {
   return sheet;
 }
 
-function findExpenseHeader(sheet: XLSX.WorkSheet): number {
-  const expected = ["Date", "Description", "Amount", "Who Paid", "Expense Type"];
+type HeaderLocation = { row: number; column: number };
+
+function findHeaders(sheet: XLSX.WorkSheet, expected: string[], label: string, expectedCount = 1): HeaderLocation[] {
   const { start, end } = sheetRange(sheet);
-  for (let row = start.r + 1; row <= Math.min(end.r + 1, 50); row += 1) {
-    const values = expected.map((_, index) => textValue(cell(sheet, row, index + 1)).trim());
-    if (values.every((value, index) => value === expected[index])) return row;
+  const matches: HeaderLocation[] = [];
+  for (let row = start.r + 1; row <= end.r + 1; row += 1) {
+    for (let column = start.c + 1; column <= end.c + 2 - expected.length; column += 1) {
+      const values = expected.map((_, index) => textValue(cell(sheet, row, column + index)));
+      if (values.every((value, index) => value === expected[index])) matches.push({ row, column });
+    }
   }
-  throw new Error("Common Expense A:E headers were not found");
+  if (matches.length !== expectedCount) {
+    throw new Error(`${label} header tuple is ${matches.length ? "ambiguous" : "missing"}; expected ${expectedCount}, found ${matches.length}`);
+  }
+  return matches;
 }
 
-type Enrichment = { date: string; amountPaise: number; payer: "Mahesh" | "Satish"; paidTo: string | null; notes: string | null };
+function findHeaderVariant(sheet: XLSX.WorkSheet, alternatives: string[][], label: string): HeaderLocation {
+  const matches = alternatives.flatMap((expected) => {
+    try {
+      return findHeaders(sheet, expected, label);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("header tuple is missing")) return [];
+      throw error;
+    }
+  });
+  if (matches.length !== 1) {
+    throw new Error(`${label} header tuple is ${matches.length ? "ambiguous" : "missing"}; expected 1, found ${matches.length}`);
+  }
+  return matches[0];
+}
 
-function parseEnrichments(workbook: XLSX.WorkBook): Enrichment[] {
+type Enrichment = {
+  date: string;
+  amountPaise: number;
+  payer: "Mahesh" | "Satish";
+  paidTo: string | null;
+  notes: string | null;
+  source: NormalizedExpense["enrichmentSource"];
+};
+
+function parseEnrichments(workbook: XLSX.WorkBook, changes: NormalizationChange[]): Enrichment[] {
   const entries: Enrichment[] = [];
   for (const [sheetName, payer] of [["Sat-Expense Log", "Satish"], ["Mah-Expense-Log", "Mahesh"]] as const) {
     const sheet = workbook.Sheets[sheetName];
@@ -131,9 +163,26 @@ function parseEnrichments(workbook: XLSX.WorkBook): Enrichment[] {
       const date = parseLegacyDate(rawValue(cell(sheet, row, 1))).value;
       const amountPaise = moneyPaise(cell(sheet, row, 5));
       if (!date || amountPaise === null) continue;
-      const paidTo = textValue(cell(sheet, row, 6)).trim() || null;
-      const notes = [textValue(cell(sheet, row, 7)).trim(), textValue(cell(sheet, row, 8)).trim()].filter(Boolean).join(" | ") || null;
-      entries.push({ date, amountPaise, payer, paidTo, notes });
+      const paidToRaw = textValue(cell(sheet, row, 6));
+      const paidTo = paidToRaw.trim() || null;
+      if (paidToRaw && paidToRaw !== paidTo) addChange(changes, sheetName, row, "paidTo", paidToRaw, paidTo, "detail-paid-to-trim");
+      const noteValues = [7, 8].map((column) => ({ column, raw: textValue(cell(sheet, row, column)) }));
+      for (const note of noteValues) {
+        const trimmed = note.raw.trim();
+        if (note.raw && note.raw !== trimmed) addChange(changes, sheetName, row, `notes.${XLSX.utils.encode_col(note.column - 1)}`, note.raw, trimmed, "detail-note-trim");
+      }
+      const trimmedNotes = noteValues.map((note) => note.raw.trim()).filter(Boolean);
+      const notes = trimmedNotes.join(" | ") || null;
+      if (trimmedNotes.length > 1) addChange(changes, sheetName, row, "notes", trimmedNotes, notes, "detail-notes-combine");
+      const consumedColumns = [1, 5, ...(paidTo ? [6] : []), ...noteValues.filter((note) => note.raw.trim()).map((note) => note.column)];
+      entries.push({
+        date,
+        amountPaise,
+        payer,
+        paidTo,
+        notes,
+        source: { sheet: sheetName, row, cells: consumedColumns.map((column) => `${XLSX.utils.encode_col(column - 1)}${row}`) },
+      });
     }
   }
   return entries;
@@ -144,23 +193,25 @@ function formulaCache(value: XLSX.CellObject | undefined): FormulaCache | null {
   return { formula: value.f.replace(/^=/, ""), value: value.v };
 }
 
-function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], warnings: ImportIssue[], errors: ImportIssue[]): { expenses: NormalizedExpense[]; discovered: number } {
+function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], warnings: ImportIssue[], errors: ImportIssue[]): { expenses: NormalizedExpense[]; discovered: number; skipped: number } {
   const sheetName = "Common Expense";
   const sheet = requireSheet(workbook, sheetName);
-  const headerRow = findExpenseHeader(sheet);
+  const [{ row: headerRow, column: headerColumn }] = findHeaders(sheet, ["Date", "Description", "Amount", "Who Paid", "Expense Type"], "Common Expense");
   const { end } = sheetRange(sheet);
-  const enrichments = parseEnrichments(workbook);
+  const enrichments = parseEnrichments(workbook, changes);
   const expenses: NormalizedExpense[] = [];
   let discovered = 0;
+  let skipped = 0;
 
   for (let row = headerRow + 1; row <= end.r + 1; row += 1) {
-    const cells = [1, 2, 3, 4, 5].map((column) => cell(sheet, row, column));
+    const cells = [0, 1, 2, 3, 4].map((offset) => cell(sheet, row, headerColumn + offset));
     if (cells.every((value) => rawValue(value) == null || textValue(value).trim() === "")) continue;
     discovered += 1;
     const raw = { date: rawValue(cells[0]), description: rawValue(cells[1]), amount: rawValue(cells[2]), paidBy: rawValue(cells[3]), category: rawValue(cells[4]) };
     const parsedDate = parseLegacyDate(raw.date);
     if (!parsedDate.value) {
       errors.push(issue("error", "expense", "INVALID_DATE", sheetName, row, "Date is not one of the strict supported Excel date forms", raw));
+      skipped += 1;
       continue;
     }
     if (parsedDate.changed) addChange(changes, sheetName, row, "date", raw.date, parsedDate.value, parsedDate.rule!);
@@ -169,6 +220,7 @@ function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
     const amountPaise = moneyPaise(cells[2]);
     if (amountPaise === null) {
       errors.push(issue("error", "expense", "INVALID_AMOUNT", sheetName, row, "Amount must be numeric, positive, and have at most two decimal places", raw));
+      skipped += 1;
       continue;
     }
     const payerRaw = textValue(cells[3]).trim();
@@ -176,6 +228,7 @@ function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
     if (payer.changed) addChange(changes, sheetName, row, "paidBy", payerRaw, payer.value, payer.rule!);
     if (payer.value !== "Mahesh" && payer.value !== "Satish") {
       errors.push(issue("error", "expense", "UNKNOWN_PAYER", sheetName, row, "Payer is not an explicitly recognized person", raw));
+      skipped += 1;
       continue;
     }
 
@@ -204,15 +257,17 @@ function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
     const matching = enrichments.filter((entry) => entry.date === parsedDate.value && entry.amountPaise === amountPaise && entry.payer === payer.value);
     let paidTo: string | null = null;
     let notes: string | null = null;
+    let enrichmentSource: NormalizedExpense["enrichmentSource"] = null;
     if (matching.length === 1) {
       paidTo = matching[0].paidTo;
       notes = matching[0].notes;
+      enrichmentSource = matching[0].source;
     } else if (matching.length > 1) {
       warnings.push(issue("warning", "expense", "AMBIGUOUS_DETAIL_MATCH", sheetName, row, "Multiple exact detail-log matches exist; no enrichment was applied", raw));
     }
 
     const categoryId = categoryName === "Uncategorized" ? "category_uncategorized" : stableId("category_import", fingerprint("category", normalizedName(categoryName)));
-    const identity = { sheet: sheetName, row, date: parsedDate.value, description, amountPaise, payer: payer.value, categoryName, paidTo, notes };
+    const identity = { sheet: sheetName, row, date: parsedDate.value, description, amountPaise, payer: payer.value, categoryName, paidTo, notes, enrichmentSource };
     const importFingerprint = fingerprint("expense", identity);
     expenses.push({
       id: stableId("expense_import", importFingerprint),
@@ -224,44 +279,46 @@ function expenseRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
       categoryName,
       paidTo,
       notes,
+      enrichmentSource,
       source: "EXCEL",
       sourceSheet: sheetName,
       sourceRow: row,
       importFingerprint,
     });
   }
-  return { expenses, discovered };
+  return { expenses, discovered, skipped };
 }
 
-function plantationRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], warnings: ImportIssue[]): { records: NormalizedPlantation[]; discovered: number } {
+function plantationRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], warnings: ImportIssue[]): { records: NormalizedPlantation[]; discovered: number; skipped: number } {
   const sheetName = "Plantation Details";
   const sheet = requireSheet(workbook, sheetName);
   const { end } = sheetRange(sheet);
-  const blocks: number[] = [];
-  for (let column = 1; column <= end.c + 1; column += 1) {
-    if (textValue(cell(sheet, 1, column)).trim() === "Name" && textValue(cell(sheet, 1, column + 1)).trim() === "MT" && textValue(cell(sheet, 1, column + 2)).trim() === "SK") blocks.push(column);
-  }
-  if (blocks.length !== 2) throw new Error("Expected exactly two Plantation Details Name/MT/SK blocks");
+  const blocks = findHeaders(sheet, ["Name", "MT", "SK"], "Plantation Details", 2);
 
   const aggregates = new Map<string, { cropName: string; farmAreaId: "area_mt" | "area_sk"; quantity: number; sources: SourceCell[] }>();
   let discovered = 0;
+  let skipped = 0;
   for (const block of blocks) {
-    for (let row = 2; row <= end.r + 1; row += 1) {
-      const cropRaw = textValue(cell(sheet, row, block));
+    const nextOverlappingHeader = blocks
+      .filter((candidate) => candidate.row > block.row && candidate.column <= block.column + 2 && block.column <= candidate.column + 2)
+      .reduce((minimum, candidate) => Math.min(minimum, candidate.row), end.r + 2);
+    for (let row = block.row + 1; row < nextOverlappingHeader; row += 1) {
+      const cropRaw = textValue(cell(sheet, row, block.column));
       const cropTrimmed = cropRaw.trim();
       const totalLabel = cropTrimmed.toLocaleLowerCase("en-IN").replace(/\s+/g, "");
       if (!cropTrimmed || ["total", "sum", "grandtotal"].includes(totalLabel)) continue;
       const crop = normalizeCrop(cropRaw);
       if (crop.changed) addChange(changes, sheetName, row, "crop", cropRaw, crop.value, crop.rule!);
       for (const [offset, area, columnName] of [[1, "area_mt", "MT"], [2, "area_sk", "SK"]] as const) {
-        const quantity = numericValue(cell(sheet, row, block + offset));
+        const quantity = numericValue(cell(sheet, row, block.column + offset));
         if (quantity === null || quantity <= 0) continue;
         discovered += 1;
         if (!Number.isSafeInteger(quantity)) {
           warnings.push(issue("warning", "plantation", "INVALID_QUANTITY", sheetName, row, "Plantation quantity is not a positive integer", { crop: cropRaw, area: columnName, quantity }));
+          skipped += 1;
           continue;
         }
-        const source: SourceCell = { sheet: sheetName, row, column: XLSX.utils.encode_col(block + offset - 1) };
+        const source: SourceCell = { sheet: sheetName, row, column: XLSX.utils.encode_col(block.column + offset - 1) };
         const key = `${crop.value}\u0000${area}`;
         const existing = aggregates.get(key);
         if (existing) {
@@ -293,29 +350,44 @@ function plantationRows(workbook: XLSX.WorkBook, changes: NormalizationChange[],
         importFingerprint,
       };
     });
-  return { records, discovered };
+  return { records, discovered, skipped };
 }
 
-function harvestRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], warnings: ImportIssue[], errors: ImportIssue[]): { records: NormalizedHarvest[]; discovered: number } {
+function harvestRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], warnings: ImportIssue[], errors: ImportIssue[]): { records: NormalizedHarvest[]; discovered: number; skipped: number } {
   const sheetName = "Banana Harvest Details";
   const sheet = requireSheet(workbook, sheetName);
+  const { row: headerRow, column: headerColumn } = findHeaderVariant(sheet, [
+    ["Total ಬಾಳೆಗೊನೆ harvested (1st time)", "Split of ಬಾಳೆಗೊನೆ Quantity", "Gross Weight (Kg)", "Avg. Weight (Kg)", "Sell Price per kg", "Total Price"],
+    ["Total harvested", "Quantity", "Gross Weight (Kg)", "Avg. Weight (Kg)", "Sell Price per kg", "Total Price"],
+  ], "Banana Harvest Details");
+  const { end } = sheetRange(sheet);
   const records: NormalizedHarvest[] = [];
   let discovered = 0;
-  for (let row = 2; row <= 4; row += 1) {
+  let skipped = 0;
+  let foundGrandTotal = false;
+  for (let row = headerRow + 1; row <= end.r + 1; row += 1) {
+    const label = textValue(cell(sheet, row, headerColumn)).trim().toLocaleLowerCase("en-IN").replace(/\s+/g, "");
+    if (label === "grandtotal") {
+      foundGrandTotal = true;
+      break;
+    }
+    if ([0, 1, 2, 3, 4, 5].every((offset) => rawValue(cell(sheet, row, headerColumn + offset)) == null)) continue;
     discovered += 1;
-    const quantity = numericValue(cell(sheet, row, 2));
-    const gross = numericValue(cell(sheet, row, 3));
-    const net = numericValue(cell(sheet, row, 4));
-    const pricePaise = moneyPaise(cell(sheet, row, 5));
-    const actualPaise = moneyPaise(cell(sheet, row, 6));
-    const cache = formulaCache(cell(sheet, row, 6));
-    const raw = { quantity: rawValue(cell(sheet, row, 2)), grossWeightKg: rawValue(cell(sheet, row, 3)), netWeightKg: rawValue(cell(sheet, row, 4)), salePrice: rawValue(cell(sheet, row, 5)), revenue: rawValue(cell(sheet, row, 6)) };
+    const quantity = numericValue(cell(sheet, row, headerColumn + 1));
+    const gross = numericValue(cell(sheet, row, headerColumn + 2));
+    const net = numericValue(cell(sheet, row, headerColumn + 3));
+    const pricePaise = moneyPaise(cell(sheet, row, headerColumn + 4));
+    const actualPaise = moneyPaise(cell(sheet, row, headerColumn + 5));
+    const cache = formulaCache(cell(sheet, row, headerColumn + 5));
+    const raw = { quantity: rawValue(cell(sheet, row, headerColumn + 1)), grossWeightKg: rawValue(cell(sheet, row, headerColumn + 2)), netWeightKg: rawValue(cell(sheet, row, headerColumn + 3)), salePrice: rawValue(cell(sheet, row, headerColumn + 4)), revenue: rawValue(cell(sheet, row, headerColumn + 5)) };
     if (quantity === null || quantity < 0 || net === null || net < 0 || pricePaise === null || actualPaise === null) {
       errors.push(issue("error", "harvest", "INVALID_HARVEST", sheetName, row, "Harvest row lacks required non-negative numeric cached values", raw));
+      skipped += 1;
       continue;
     }
     if (!cache) {
       errors.push(issue("error", "harvest", "MISSING_FORMULA_CACHE", sheetName, row, "Harvest revenue formula has no numeric cached value", raw));
+      skipped += 1;
       continue;
     }
     if (gross === null && raw.grossWeightKg != null) addChange(changes, sheetName, row, "grossWeightKg", raw.grossWeightKg, null, "dash-as-missing");
@@ -325,6 +397,7 @@ function harvestRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
       calculatedRevenuePaise = calculateRevenuePaise(decimalString(net), pricePaise);
     } catch {
       errors.push(issue("error", "harvest", "INVALID_REVENUE_RANGE", sheetName, row, "Calculated harvest revenue exceeds the supported range", raw));
+      skipped += 1;
       continue;
     }
     const importFingerprint = fingerprint("harvest", { sheet: sheetName, row, quantity, gross, net, pricePaise, actualPaise, formula: cache.formula });
@@ -346,7 +419,8 @@ function harvestRows(workbook: XLSX.WorkBook, changes: NormalizationChange[], wa
       importFingerprint,
     });
   }
-  return { records, discovered };
+  if (!foundGrandTotal) throw new Error("Banana Harvest Details Grand Total row is missing");
+  return { records, discovered, skipped };
 }
 
 function deduplicate<T extends { importFingerprint: string }>(records: T[]): { records: T[]; duplicates: number } {
@@ -363,24 +437,8 @@ function deduplicate<T extends { importFingerprint: string }>(records: T[]): { r
   return { records: unique, duplicates };
 }
 
-export async function workbookChecksum(workbookPath: string): Promise<string> {
-  return sha256(await fs.readFile(workbookPath));
-}
-
-export async function validateWorkbookPath(workbookPath: string): Promise<{ absolutePath: string; checksum: string }> {
-  if (!workbookPath.trim()) throw new Error("An explicit workbook path is required");
-  const absolutePath = path.resolve(workbookPath);
-  const stat = await fs.stat(absolutePath);
-  if (!stat.isFile() || path.extname(absolutePath).toLocaleLowerCase("en-IN") !== ".xlsx") throw new Error("Workbook path must identify an .xlsx file");
-  const checksum = await workbookChecksum(absolutePath);
-  if (path.basename(absolutePath) === CANONICAL_WORKBOOK_NAME && checksum !== CANONICAL_WORKBOOK_SHA256) {
-    throw new Error("Canonical workbook checksum does not match the approved source");
-  }
-  return { absolutePath, checksum };
-}
-
-export async function normalizeWorkbook(workbookPath: string): Promise<ImportPlan> {
-  const validated = await validateWorkbookPath(workbookPath);
+export async function normalizeWorkbook(workbookPath: string, options: { allowUnapprovedSource?: boolean } = {}): Promise<ImportPlan> {
+  const validated = await validateWorkbookPath(workbookPath, options);
   const workbook = XLSX.readFile(validated.absolutePath, { cellDates: false, cellFormula: true, cellNF: true, raw: true });
   const changes: NormalizationChange[] = [];
   const warnings: ImportIssue[] = [];
@@ -411,7 +469,9 @@ export async function normalizeWorkbook(workbookPath: string): Promise<ImportPla
       harvests: harvestResult.discovered,
     },
     duplicates: expenseDeduped.duplicates + plantationDeduped.duplicates + harvestDeduped.duplicates,
-    sourceFile: path.basename(validated.absolutePath),
+    skipped: expenseResult.skipped + plantationResult.skipped + harvestResult.skipped,
+    sourceFile: validated.absolutePath.split(/[\\/]/).at(-1)!,
     sourceChecksum: validated.checksum,
+    approvedSource: validated.approvedSource,
   };
 }

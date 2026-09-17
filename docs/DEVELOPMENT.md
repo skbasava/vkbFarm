@@ -2,7 +2,7 @@
 
 ## Prerequisites and common commands
 
-Use Node.js 20+ and npm.
+Use Node.js 22.12+ and npm.
 
 ```bash
 npm install
@@ -32,4 +32,8 @@ Production and every preview hostname must be protected by Cloudflare Access bef
 
 ## Import and operations status
 
-Excel import scripts and receipt document endpoints are planned but not yet implemented. Do not assume they exist merely because package scripts or schema tables anticipate them. The verified workbook baselines and eventual import rules live in `docs/superpowers/specs/2026-09-09-vkb-farm-manager-design.md`.
+The Excel import scripts are implemented with approved-checksum enforcement,
+local-only owned D1 persistence, dry-run/error reporting, exact projection
+verification, and idempotent writes. Receipt document endpoints remain planned.
+The verified workbook baselines and import rules live in
+`docs/superpowers/specs/2026-09-09-vkb-farm-manager-design.md`.

@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { normalizeWorkbook } from "./normalize-excel";
+import { CANONICAL_WORKBOOK_NAME, CANONICAL_WORKBOOK_SHA256, canonicalizePotentialPath, validateWorkbookPath, workbookChecksum } from "./source-policy";
 import type { ImportDatabase, ImportPlan, SqlStatement } from "./types";
 
 const LOCAL_DATABASE_ID = "db00ab6a-447e-4d06-9937-bf2fb4f3efbf";
@@ -19,8 +20,8 @@ export default {
       }
       if (body.operation === "batch") {
         const statements = body.statements.map((value) => env.DB.prepare(value.sql).bind(...(value.params || [])));
-        await env.DB.batch(statements);
-        return Response.json({ ok: true });
+        const results = await env.DB.batch(statements);
+        return Response.json({ changes: results.map((result) => result.meta?.changes || 0) });
       }
       if (body.operation === "exec") {
         await env.DB.exec(body.sql);
@@ -38,6 +39,7 @@ export type ImportArguments = {
   dryRun: boolean;
   localDb?: string;
   errorsPath: string;
+  allowUnapprovedSource: boolean;
 };
 
 export type ImportResult = {
@@ -52,27 +54,82 @@ export type ImportResult = {
   errors: number;
   sourceFile: string;
   sourceChecksum: string;
+  approvedSource: boolean;
 };
 
-function safeLocalPath(input: string): string {
-  const resolved = path.resolve(input);
-  const unsafe = new Set([path.parse(resolved).root, os.homedir(), process.cwd()]);
-  if (unsafe.has(resolved)) throw new Error("The local database target is unsafe; choose a dedicated persistence directory");
+const OWNERSHIP_MARKER = ".vkb-import-owned.json";
+const REPORT_KIND = "vkb-farm-migration-report";
+
+function isWithin(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function sameFile(left: string, right: string): Promise<boolean> {
+  try {
+    const [leftStat, rightStat] = await Promise.all([fs.stat(left), fs.stat(right)]);
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function atomicJsonWrite(target: string, value: unknown): Promise<void> {
+  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${crypto.randomUUID()}.tmp`);
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    await fs.rename(temporary, target);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
+}
+
+export async function prepareLocalPersistenceDirectory(input: string, protectedPaths: string[] = []): Promise<string> {
+  const resolved = await canonicalizePotentialPath(input);
+  const repo = await fs.realpath(process.cwd());
+  const unsafe = [path.parse(resolved).root, await fs.realpath(os.homedir()), await fs.realpath(os.tmpdir()), repo];
+  if (unsafe.includes(resolved) || isWithin(repo, resolved)) throw new Error("The persistence directory is a protected repository or system location");
+  for (const protectedPath of protectedPaths) {
+    const canonical = await canonicalizePotentialPath(protectedPath);
+    if (isWithin(resolved, canonical) || isWithin(canonical, resolved)) throw new Error("The persistence directory overlaps a protected source or output location");
+  }
+  let exists = true;
+  try {
+    if (!(await fs.stat(resolved)).isDirectory()) throw new Error("The persistence target must be a directory");
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+    exists = false;
+  }
+  if (!exists) await fs.mkdir(resolved, { recursive: true });
+  const marker = path.join(resolved, OWNERSHIP_MARKER);
+  const entries = await fs.readdir(resolved);
+  if (!exists) {
+    await atomicJsonWrite(marker, { kind: "vkb-farm-import-persistence", version: 1 });
+  } else if (!entries.includes(OWNERSHIP_MARKER)) {
+    throw new Error("The persistence directory is not importer-owned");
+  } else {
+    const ownership = JSON.parse(await fs.readFile(marker, "utf8")) as { kind?: string; version?: number };
+    if (ownership.kind !== "vkb-farm-import-persistence" || ownership.version !== 1) throw new Error("The persistence directory ownership marker is invalid");
+  }
   return resolved;
 }
 
 export function parseImportArguments(args: string[]): ImportArguments {
   let workbookPath: string | undefined;
   let localDb: string | undefined;
-  let errorsPath = path.resolve("migration-errors.json");
+  let errorsPath = path.join(os.tmpdir(), "vkb-migration-errors.json");
   let dryRun = false;
+  let allowUnapprovedSource = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--dry-run") dryRun = true;
+    else if (argument === "--allow-unapproved-source") allowUnapprovedSource = true;
     else if (argument === "--local-db") {
       const value = args[++index];
       if (!value || value.startsWith("--")) throw new Error("--local-db requires a dedicated local persistence directory");
-      localDb = safeLocalPath(value);
+      localDb = path.resolve(value);
+      if ([path.parse(localDb).root, os.homedir(), process.cwd(), os.tmpdir()].includes(localDb)) throw new Error("The local database target is unsafe; choose a dedicated persistence directory");
     } else if (argument === "--errors") {
       const value = args[++index];
       if (!value || value.startsWith("--")) throw new Error("--errors requires an output file path");
@@ -83,14 +140,14 @@ export function parseImportArguments(args: string[]): ImportArguments {
   }
   if (!workbookPath) throw new Error("An explicit workbook path is required");
   if (!dryRun && !localDb) throw new Error("--local-db is required for imports; remote D1 is never supported");
-  return { workbookPath, dryRun, ...(localDb ? { localDb } : {}), errorsPath };
+  return { workbookPath, dryRun, ...(localDb ? { localDb } : {}), errorsPath, allowUnapprovedSource };
 }
 
 export class LocalD1Database implements ImportDatabase {
   private constructor(public readonly persistTo: string, private readonly miniflare: Miniflare) {}
 
   static async open(persistTo: string): Promise<LocalD1Database> {
-    const resolved = safeLocalPath(persistTo);
+    const resolved = await prepareLocalPersistenceDirectory(persistTo);
     await fs.mkdir(path.join(resolved, "v3"), { recursive: true });
     const options = convertV4MiniflareOptions({
       modules: true,
@@ -122,9 +179,10 @@ export class LocalD1Database implements ImportDatabase {
     return response.results;
   }
 
-  async batch(statements: SqlStatement[]): Promise<void> {
-    if (!statements.length) return;
-    await this.request({ operation: "batch", statements }, "batch");
+  async batch(statements: SqlStatement[]): Promise<number[]> {
+    if (!statements.length) return [];
+    const result = await this.request<{ changes: number[] }>({ operation: "batch", statements }, "batch");
+    return result.changes;
   }
 
   async exec(sql: string): Promise<void> {
@@ -163,16 +221,17 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
   const categoryIds = new Map(categoryRows.map((row) => [row.normalized_name, row.id]));
   const cropIds = new Map(cropRows.map((row) => [row.normalized_name, row.id]));
   const statements: SqlStatement[] = [];
+  const statementKinds: Array<keyof ImportResult["inserted"]> = [];
   const inserted = { categories: 0, crops: 0, expenses: 0, plantation: 0, harvests: 0 };
 
   for (const category of plan.categories) {
     if (categoryIds.has(category.normalizedName)) continue;
     statements.push({
-      sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES (?, ?, ?)",
+      sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES (?, ?, ?) ON CONFLICT(normalized_name) DO NOTHING",
       params: [category.id, category.name, category.normalizedName],
     });
+    statementKinds.push("categories");
     categoryIds.set(category.normalizedName, category.id);
-    inserted.categories += 1;
   }
 
   const uniqueCrops = new Map<string, { id: string; name: string }>();
@@ -183,9 +242,9 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
   }
   for (const [normalized, crop] of [...uniqueCrops.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     if (cropIds.has(normalized)) continue;
-    statements.push({ sql: "INSERT INTO crops (id, name, normalized_name) VALUES (?, ?, ?)", params: [crop.id, crop.name, normalized] });
+    statements.push({ sql: "INSERT INTO crops (id, name, normalized_name) VALUES (?, ?, ?) ON CONFLICT(normalized_name) DO NOTHING", params: [crop.id, crop.name, normalized] });
+    statementKinds.push("crops");
     cropIds.set(normalized, crop.id);
-    inserted.crops += 1;
   }
 
   const now = new Date().toISOString();
@@ -197,11 +256,12 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
       sql: `INSERT INTO expenses (
         id, expense_date, description, amount_paise, paid_by_person_id, category_id,
         expense_class, paid_to, notes, crop_id, is_shared, source, source_sheet,
-        source_row, import_fingerprint, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, 'EXCEL', ?, ?, ?, ?)`,
-      params: [expense.id, expense.expenseDate, expense.description, expense.amountPaise, expense.paidByPersonId, categoryId, expense.paidTo, expense.notes, expense.sourceSheet, expense.sourceRow, expense.importFingerprint, now],
+        source_row, import_fingerprint, enrichment_source_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, 'EXCEL', ?, ?, ?, ?, ?)
+      ON CONFLICT(import_fingerprint) WHERE import_fingerprint IS NOT NULL DO NOTHING`,
+      params: [expense.id, expense.expenseDate, expense.description, expense.amountPaise, expense.paidByPersonId, categoryId, expense.paidTo, expense.notes, expense.sourceSheet, expense.sourceRow, expense.importFingerprint, expense.enrichmentSource ? JSON.stringify(expense.enrichmentSource) : null, now],
     });
-    inserted.expenses += 1;
+    statementKinds.push("expenses");
   }
   for (const plantation of plan.plantation) {
     if (existingPlantation.has(plantation.importFingerprint)) continue;
@@ -211,10 +271,11 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
       sql: `INSERT INTO plantation_inventory (
         id, crop_id, farm_area_id, quantity, planting_date, notes, source,
         source_sheet, source_row, import_fingerprint, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, ?, 'EXCEL', ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, NULL, ?, 'EXCEL', ?, ?, ?, ?)
+      ON CONFLICT(import_fingerprint) WHERE import_fingerprint IS NOT NULL DO NOTHING`,
       params: [plantation.id, cropId, plantation.farmAreaId, plantation.quantity, sourceNotes(plantation.sources), plantation.sourceSheet, plantation.sourceRow, plantation.importFingerprint, now],
     });
-    inserted.plantation += 1;
+    statementKinds.push("plantation");
   }
   for (const harvest of plan.harvests) {
     if (existingHarvests.has(harvest.importFingerprint)) continue;
@@ -226,35 +287,82 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
         average_weight_kg, sale_price_paise_per_kg, calculated_revenue_paise,
         actual_revenue_paise, revenue_override_reason, buyer, notes, source,
         source_sheet, source_row, import_fingerprint, updated_at
-      ) VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, ?, 'EXCEL', ?, ?, ?, ?)`,
+      ) VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, ?, 'EXCEL', ?, ?, ?, ?)
+      ON CONFLICT(import_fingerprint) WHERE import_fingerprint IS NOT NULL DO NOTHING`,
       params: [harvest.id, cropId, harvest.quantity, harvest.grossWeightKg, harvest.netWeightKg, harvest.salePricePaisePerKg, harvest.calculatedRevenuePaise, harvest.actualRevenuePaise, `Cached formula: ${harvest.formulaCache?.formula ?? "unavailable"}`, harvest.sourceSheet, harvest.sourceRow, harvest.importFingerprint, now],
     });
-    inserted.harvests += 1;
+    statementKinds.push("harvests");
   }
 
-  await database.batch(statements);
-  const duplicates = plan.duplicates
-    + plan.expenses.filter((row) => existingExpenses.has(row.importFingerprint)).length
-    + plan.plantation.filter((row) => existingPlantation.has(row.importFingerprint)).length
-    + plan.harvests.filter((row) => existingHarvests.has(row.importFingerprint)).length;
+  const changes = await database.batch(statements);
+  changes.forEach((count, index) => { inserted[statementKinds[index]] += count; });
+  const duplicates = plan.duplicates + plan.expenses.length + plan.plantation.length + plan.harvests.length
+    - inserted.expenses - inserted.plantation - inserted.harvests;
   return { inserted, duplicates };
 }
 
+async function validateIssueReportPath(errorsPath: string, sourcePath: string, persistTo?: string): Promise<string> {
+  if (path.extname(errorsPath).toLocaleLowerCase("en-IN") !== ".json") throw new Error("--errors must use a .json destination");
+  const target = await canonicalizePotentialPath(errorsPath);
+  const source = await canonicalizePotentialPath(sourcePath);
+  const repo = await fs.realpath(process.cwd());
+  const canonicalWorkbook = await canonicalizePotentialPath(path.join(repo, "data", CANONICAL_WORKBOOK_NAME));
+  if (target === source || await sameFile(target, source)) throw new Error("The issue report cannot overwrite the source workbook");
+  if (target === canonicalWorkbook || await sameFile(target, canonicalWorkbook)) throw new Error("The issue report cannot overwrite the canonical workbook");
+  try {
+    if ((await fs.stat(target)).isFile() && await workbookChecksum(target) === CANONICAL_WORKBOOK_SHA256) {
+      throw new Error("The issue report cannot overwrite a canonical workbook copy");
+    }
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+  }
+  if (path.extname(target).toLocaleLowerCase("en-IN") !== ".json") throw new Error("The resolved --errors destination must use a .json file");
+  if (isWithin(repo, target)) throw new Error("The issue report cannot overwrite repository files or directories");
+  if (persistTo) {
+    const persistence = await canonicalizePotentialPath(persistTo);
+    if (isWithin(persistence, target) || isWithin(target, persistence)) throw new Error("The issue report cannot overlap the persistence directory");
+  }
+  try {
+    const existing = JSON.parse(await fs.readFile(target, "utf8")) as { kind?: string };
+    if (existing.kind !== REPORT_KIND) throw new Error("The issue report destination contains an unrelated file");
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+  }
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  return target;
+}
+
 async function writeIssueReport(plan: ImportPlan, errorsPath: string): Promise<void> {
-  await fs.mkdir(path.dirname(errorsPath), { recursive: true });
-  await fs.writeFile(errorsPath, `${JSON.stringify({
+  await atomicJsonWrite(errorsPath, {
+    kind: REPORT_KIND,
     version: 1,
-    source: { file: plan.sourceFile, sha256: plan.sourceChecksum },
+    source: { file: plan.sourceFile, sha256: plan.sourceChecksum, approved: plan.approvedSource },
     counts: { warnings: plan.warnings.length, errors: plan.errors.length },
+    provenance: {
+      expenses: plan.expenses.map((expense) => ({
+        source: { sheet: expense.sourceSheet, row: expense.sourceRow },
+        enrichment: expense.enrichmentSource,
+        fingerprint: expense.importFingerprint,
+      })),
+      plantation: plan.plantation.map((record) => ({ sources: record.sources, fingerprint: record.importFingerprint })),
+      harvests: plan.harvests.map((record) => ({
+        source: { sheet: record.sourceSheet, row: record.sourceRow },
+        formulaCache: record.formulaCache,
+        fingerprint: record.importFingerprint,
+      })),
+    },
     changes: plan.changes,
     warnings: plan.warnings,
     errors: plan.errors,
-  }, null, 2)}\n`, "utf8");
+  });
 }
 
-export async function importWorkbook(options: { workbookPath: string; dryRun: boolean; localDb?: string; errorsPath: string }): Promise<ImportResult> {
-  const plan = await normalizeWorkbook(options.workbookPath);
-  await writeIssueReport(plan, options.errorsPath);
+export async function importWorkbook(options: { workbookPath: string; dryRun: boolean; localDb?: string; errorsPath: string; allowUnapprovedSource?: boolean }): Promise<ImportResult> {
+  const source = await validateWorkbookPath(options.workbookPath, { allowUnapprovedSource: options.allowUnapprovedSource });
+  const errorsPath = await validateIssueReportPath(options.errorsPath, source.absolutePath, options.localDb);
+  if (options.localDb) await prepareLocalPersistenceDirectory(options.localDb, [source.absolutePath, errorsPath]);
+  const plan = await normalizeWorkbook(source.absolutePath, { allowUnapprovedSource: options.allowUnapprovedSource });
+  await writeIssueReport(plan, errorsPath);
   const accepted = { expenses: plan.expenses.length, plantation: plan.plantation.length, harvests: plan.harvests.length };
   if (options.dryRun) {
     return {
@@ -262,16 +370,18 @@ export async function importWorkbook(options: { workbookPath: string; dryRun: bo
       inserted: { categories: 0, crops: 0, expenses: 0, plantation: 0, harvests: 0 },
       duplicates: plan.duplicates,
       accepted,
-      skipped: plan.errors.length,
+      skipped: plan.skipped,
       discovered: plan.discovered,
       normalized: plan.changes.length,
       warnings: plan.warnings.length,
       errors: plan.errors.length,
       sourceFile: plan.sourceFile,
       sourceChecksum: plan.sourceChecksum,
+      approvedSource: plan.approvedSource,
     };
   }
   if (!options.localDb) throw new Error("An explicit local D1 persistence directory is required");
+  if (plan.errors.length) throw new Error("Workbook contains import errors; no database writes were attempted");
   const database = await LocalD1Database.open(options.localDb);
   try {
     const applied = await applyImportPlan(database, plan);
@@ -279,13 +389,14 @@ export async function importWorkbook(options: { workbookPath: string; dryRun: bo
       dryRun: false,
       ...applied,
       accepted,
-      skipped: plan.errors.length,
+      skipped: plan.skipped,
       discovered: plan.discovered,
       normalized: plan.changes.length,
       warnings: plan.warnings.length,
       errors: plan.errors.length,
       sourceFile: plan.sourceFile,
       sourceChecksum: plan.sourceChecksum,
+      approvedSource: plan.approvedSource,
     };
   } finally {
     await database.dispose();

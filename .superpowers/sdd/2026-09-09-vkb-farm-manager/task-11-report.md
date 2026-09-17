@@ -14,15 +14,49 @@ verification command. No remote D1 path is accepted.
   began after implementation, so the original RED executions were not rerun or
   reconstructed; the handoff recorded that these suites were green before the
   parser dependency upgrade.
-- Recovery verification ran the focused suite after inspecting the preserved
-  changes: 3 files, 13 tests passed.
+- Fix-round recovery verification ran the focused suite after inspecting the
+  preserved changes: 4 files, 28 tests passed (4 normalization, 10 parser, 1
+  runtime, and 13 integration tests).
 - The focused coverage includes explicit-only person/category/crop mappings,
   strict legacy dates, A:E-only expense parsing, structured invalid-row issues,
   both plantation blocks, cached harvest values, stable repeated fingerprints,
   dry-run no-write behavior, dependency order, atomic rollback, idempotency,
   and independent mismatch detection.
-- A fresh full non-Worker run passed 23 files and 87 tests. The dedicated Worker
+- A fresh full non-Worker run passed 24 files and 102 tests. The dedicated Worker
   run passed 8 files and 64 tests.
+
+## Review fix round
+
+- The issue report is now an atomic JSON replacement and cannot target the
+  source workbook, any hard-link/symlink alias, the canonical workbook or an
+  existing checksum-identical copy, repository content, or local persistence.
+- Verification independently reconstructs and hashes every expense,
+  plantation, and harvest projection, including fingerprints, enrichment
+  provenance, and source locations; aggregate controls remain as a second
+  layer rather than the only check.
+- All three import regions use unique exact header-tuple discovery across the
+  complete used range. Ambiguous/missing tuples fail closed, vertical
+  plantation blocks stay independent, and a harvest Grand Total is required.
+- Exact detail-log enrichment now stores its source sheet, row, and consumed
+  cells in D1 through additive migration `0005_import_provenance.sql`.
+  Trimming and note combining are logged as transformations; ambiguous exact
+  matches remain unenriched with a warning.
+- Checksum approval is content-based regardless of filename. Synthetic or
+  noncanonical workbooks require the explicit `--allow-unapproved-source`
+  override and never claim approved baselines.
+- Local persistence is canonicalized, must be newly created or carry the
+  importer ownership marker, and cannot overlap the repository, source,
+  report, or protected system locations. The preparatory CLI makes this
+  contract explicit before Wrangler migrations.
+- Database `ON CONFLICT` handling and returned D1 change counts make concurrent
+  identical imports idempotent and keep inserted/duplicate reporting truthful.
+- The runtime documentation and package metadata now consistently require Node
+  22.12+, matching the installed Vite/Cloudflare toolchain.
+- Automated coverage now includes warning-skipped counts, mandatory harvest
+  total evidence, checksum/name behavior, path aliases, owned persistence,
+  source errors before D1 access, existing reference reuse, fresh and pre-0005
+  schema paths, simultaneous imports, and the real approved workbook with its
+  exact 437-duplicate rerun.
 
 ## Source checksum and parser decision
 
@@ -58,15 +92,15 @@ verification command. No remote D1 path is accepted.
   paise. The source `Avg. Weight (Kg)` values used by the formulas are retained
   as net weight, while average weight remains empty with three explicit
   ambiguity warnings.
-- The complete real dry run reported 99 logged normalization changes, 25
+- The complete real dry run reported 101 logged normalization changes, 25
   warnings, and 0 errors.
 
 ## Fresh disposable D1 verification
 
-Persistence directory: `/tmp/vkb-task11-real-5Ap2hf` (local and disposable;
-removed after verification).
+Persistence directory: `/tmp/vkb-task11-fresh-LCNlhA/db` (local and
+disposable; removed after verification).
 
-1. All four migrations applied locally with Wrangler 4.130.0.
+1. All five migrations applied locally with Wrangler 4.130.0.
 2. Dry run accepted 394 expenses, 40 plantation records, and 3 harvests; it
    inserted nothing and reported 0 errors.
 3. First import inserted 87 categories, 23 crops, 394 expenses, 40 plantation
@@ -77,6 +111,9 @@ removed after verification).
    revenue 1,008,500 paise.
 5. The second import inserted 0 categories, crops, expenses, plantation records,
    or harvests and reported exactly 437 duplicate business fingerprints.
+6. A separate disposable database applied migrations 0001–0004, accepted a
+   populated expense probe, upgraded through 0005, and preserved that row with
+   `enrichment_source_json = NULL`.
 
 ## Dependency and audit evidence
 
@@ -98,10 +135,9 @@ removed after verification).
 
 ## Final verification
 
-- `npm ci`: 415 packages installed successfully from the final lockfile.
-- Task-focused Vitest: 3 files, 13 tests passed.
-- Unit/frontend/integration Vitest with Worker files excluded: 23 files,
-  87 tests passed.
+- Task-focused Vitest: 4 files, 28 tests passed.
+- Unit/frontend/integration Vitest with Worker files excluded: 24 files,
+  102 tests passed.
 - Dedicated Cloudflare Worker Vitest: 8 files, 64 tests passed.
 - `npm run typecheck`, `npm run lint`, and `npm run build`: exited 0.
 - `git diff --check`: no whitespace errors.
@@ -112,9 +148,12 @@ removed after verification).
   `tests/fixtures/farm-import.xlsx`
 - Import implementation: `scripts/types.ts`, `scripts/data-normalization.ts`,
   `scripts/normalize-excel.ts`, `scripts/import-excel.ts`,
-  `scripts/verify-import.ts`
+  `scripts/verify-import.ts`, `scripts/source-policy.ts`, and
+  `scripts/prepare-import-db.ts`
+- Schema: `migrations/0005_import_provenance.sql`
 - Tests: `tests/unit/data-normalization.test.ts`,
-  `tests/unit/normalize-excel.test.ts`, `tests/integration/import-excel.test.ts`
+  `tests/unit/normalize-excel.test.ts`, `tests/unit/import-runtime.test.ts`, and
+  `tests/integration/import-excel.test.ts`
 - Configuration and documentation: `package.json`, `package-lock.json`,
   `tsconfig.json`, `tsconfig.scripts.json`, `README.md`,
   `IMPLEMENTATION_STATUS.md`, `docs/DECISIONS.md`
@@ -128,3 +167,10 @@ removed after verification).
   unrelated test-runner boundary.
 - The remaining six development-only audit findings require coordinated
   Cloudflare plugin upgrades rather than an importer-local dependency change.
+- A fresh online audit attempt during the fix round was blocked because sending
+  the dependency tree to the public registry was not authorized. The lockfile
+  dependency graph is unchanged by the fix round (only the root Node engine was
+  added), so the prior successful audit remains the applicable evidence: zero
+  production findings and six high development-only Cloudflare-toolchain
+  findings. `npm audit --offline` had no cached advisories and was not treated
+  as authoritative.
