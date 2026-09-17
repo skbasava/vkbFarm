@@ -127,6 +127,7 @@ async function compensateUpload(
       JSON.stringify({
         event: "document_upload_compensation_failed",
         documentId,
+        objectKey,
         stage,
       }),
     );

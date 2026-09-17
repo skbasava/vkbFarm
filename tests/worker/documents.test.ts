@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../worker/index";
 import type { Bindings } from "../../worker/types";
 
@@ -234,6 +234,7 @@ describe("document API", () => {
   });
 
   it("reports storage failure when D1 fails and R2 compensation cannot delete", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await env.DB.prepare(
       `CREATE TRIGGER block_document_audit
        BEFORE INSERT ON audit_log
@@ -264,19 +265,35 @@ describe("document API", () => {
       );
 
       expect(response.status).toBe(503);
-      await expect(response.json()).resolves.toEqual({
+      const clientBody = await response.json();
+      expect(clientBody).toEqual({
         error: {
           code: "DOCUMENT_STORAGE_ERROR",
           message: "The receipt could not be stored safely",
         },
       });
-      expect((await env.RECEIPTS.list()).objects).toHaveLength(1);
+      const remaining = (await env.RECEIPTS.list()).objects;
+      expect(remaining).toHaveLength(1);
+      const logged = JSON.parse(String(errorLog.mock.calls.at(-1)?.[0])) as {
+        event?: string;
+        documentId?: string;
+        objectKey?: string;
+        stage?: string;
+      };
+      expect(logged).toMatchObject({
+        event: "document_upload_compensation_failed",
+        documentId: expect.any(String),
+        objectKey: remaining[0]?.key,
+        stage: "database_write",
+      });
+      expect(JSON.stringify(clientBody)).not.toContain(remaining[0]?.key ?? "");
       expect(
         await env.DB.prepare("SELECT COUNT(*) AS count FROM documents").first<number>(
           "count",
         ),
       ).toBe(0);
     } finally {
+      errorLog.mockRestore();
       await env.DB.prepare("DROP TRIGGER block_document_audit").run();
     }
   });
@@ -331,6 +348,7 @@ describe("document API", () => {
   });
 
   it("does not report a missing expense when race compensation cannot delete R2", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const undeletableRacingBucket = new Proxy(env.RECEIPTS, {
       get(target, property) {
         if (property === "put") {
@@ -361,30 +379,49 @@ describe("document API", () => {
     form.append("expenseId", "expense-document-test");
     form.append("file", receiptFile());
 
-    const response = await app.request(
-      "http://example.com/api/v1/documents",
-      { method: "POST", body: form },
-      bindings,
-    );
+    try {
+      const response = await app.request(
+        "http://example.com/api/v1/documents",
+        { method: "POST", body: form },
+        bindings,
+      );
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "DOCUMENT_STORAGE_ERROR",
-        message: "The receipt could not be stored safely",
-      },
-    });
-    expect((await env.RECEIPTS.list()).objects).toHaveLength(1);
-    expect(
-      await env.DB.prepare("SELECT COUNT(*) AS count FROM documents").first<number>(
-        "count",
-      ),
-    ).toBe(0);
-    expect(
-      await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM audit_log WHERE entity_type = 'document'",
-      ).first<number>("count"),
-    ).toBe(0);
+      expect(response.status).toBe(503);
+      const clientBody = await response.json();
+      expect(clientBody).toEqual({
+        error: {
+          code: "DOCUMENT_STORAGE_ERROR",
+          message: "The receipt could not be stored safely",
+        },
+      });
+      const remaining = (await env.RECEIPTS.list()).objects;
+      expect(remaining).toHaveLength(1);
+      const logged = JSON.parse(String(errorLog.mock.calls.at(-1)?.[0])) as {
+        event?: string;
+        documentId?: string;
+        objectKey?: string;
+        stage?: string;
+      };
+      expect(logged).toMatchObject({
+        event: "document_upload_compensation_failed",
+        documentId: expect.any(String),
+        objectKey: remaining[0]?.key,
+        stage: "expense_race",
+      });
+      expect(JSON.stringify(clientBody)).not.toContain(remaining[0]?.key ?? "");
+      expect(
+        await env.DB.prepare("SELECT COUNT(*) AS count FROM documents").first<number>(
+          "count",
+        ),
+      ).toBe(0);
+      expect(
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM audit_log WHERE entity_type = 'document'",
+        ).first<number>("count"),
+      ).toBe(0);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("returns the committed upload without a fallible post-commit document lookup", async () => {
