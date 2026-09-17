@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import * as nodeFs from "node:fs";
 import os from "node:os";
@@ -18,6 +19,7 @@ import {
   prepareLocalPersistenceDirectory,
 } from "../../scripts/import-excel";
 import { normalizeWorkbook } from "../../scripts/normalize-excel";
+import type { ImportDatabase, ImportPlan, NormalizedExpense } from "../../scripts/types";
 import { sourceControls, verifyImport, verifyMain } from "../../scripts/verify-import";
 
 const fixture = path.resolve("tests/fixtures/farm-import.xlsx");
@@ -48,6 +50,56 @@ async function databaseWithMigrations(migrations: string[]): Promise<LocalD1Data
   databases.push(db);
   for (const migration of migrations) await db.exec(migration);
   return db;
+}
+
+function fixBaseExpenseIdentity(expense: NormalizedExpense): { fingerprint: string; id: string } {
+  const identity = {
+    sheet: expense.sourceSheet,
+    row: expense.sourceRow,
+    date: expense.expenseDate,
+    description: expense.description,
+    amountPaise: expense.amountPaise,
+    payer: expense.paidByPersonId === "person_mahesh" ? "Mahesh" : "Satish",
+    categoryName: expense.categoryName,
+    paidTo: expense.paidTo,
+    notes: expense.notes,
+    enrichmentSource: expense.enrichmentSource,
+  };
+  const fingerprint = createHash("sha256").update(`expense\n${JSON.stringify(identity)}`).digest("hex");
+  return { fingerprint, id: `expense_import_${fingerprint.slice(0, 24)}` };
+}
+
+async function materializeFixBaseExpenses(db: LocalD1Database, plan: ImportPlan): Promise<void> {
+  await db.batch(plan.categories.map((category) => ({
+    sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES (?, ?, ?) ON CONFLICT(normalized_name) DO NOTHING",
+    params: [category.normalizedName === "food" ? "category_fixbase_food" : category.id, category.name, category.normalizedName],
+  })));
+  const categories = new Map((await db.query<{ id: string; normalized_name: string }>("SELECT id, normalized_name FROM expense_categories"))
+    .map((row) => [row.normalized_name, row.id]));
+  await db.batch(plan.expenses.map((expense) => {
+    const legacy = fixBaseExpenseIdentity(expense);
+    return {
+      sql: `INSERT INTO expenses (
+        id, expense_date, description, amount_paise, paid_by_person_id, category_id,
+        expense_class, paid_to, notes, crop_id, is_shared, source, source_sheet,
+        source_row, import_fingerprint, enrichment_source_json
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, 'EXCEL', ?, ?, ?, ?)`,
+      params: [
+        legacy.id,
+        expense.expenseDate,
+        expense.description,
+        expense.amountPaise,
+        expense.paidByPersonId,
+        categories.get(expense.categoryName.toLocaleLowerCase("en-IN"))!,
+        expense.paidTo,
+        expense.notes,
+        expense.sourceSheet,
+        expense.sourceRow,
+        legacy.fingerprint,
+        expense.enrichmentSource ? JSON.stringify(expense.enrichmentSource) : null,
+      ],
+    };
+  }));
 }
 
 afterEach(async () => {
@@ -321,14 +373,123 @@ describe("Excel import", () => {
     expect(await db.query("SELECT id, enrichment_source_json FROM expenses WHERE id = ?", [enriched.id])).toEqual([
       { id: enriched.id, enrichment_source_json: null },
     ]);
-    const result = await applyImportPlan(db, plan);
-    expect(result).toMatchObject({ inserted: { expenses: 1 }, duplicates: 1, backfilled: { expenseEnrichmentProvenance: 1 } });
+    const results = await Promise.all([applyImportPlan(db, plan), applyImportPlan(db, plan)]);
+    expect(results.map((result) => result.inserted.expenses).sort((left, right) => left - right)).toEqual([0, 1]);
+    expect(results.map((result) => result.backfilled.expenseEnrichmentProvenance).sort((left, right) => left - right)).toEqual([0, 1]);
+    expect(results.map((result) => result.duplicates).sort((left, right) => left - right)).toEqual([1, 10]);
     expect(await db.query("SELECT enrichment_source_json FROM expenses WHERE id = ?", [enriched.id])).toEqual([
       { enrichment_source_json: JSON.stringify(enriched.enrichmentSource) },
     ]);
     const verification = await verifyImport(db, fixture, { allowUnapprovedSource: true });
     expect(verification.checks.filter((check) => !check.ok)).toEqual([]);
     expect(verification.ok).toBe(true);
+  });
+
+  it("rejects wrong category foreign keys, including a same-display-name query result", async () => {
+    const db = await database();
+    const plan = await normalizeWorkbook(fixture, { allowUnapprovedSource: true });
+    await applyImportPlan(db, plan);
+    const expense = plan.expenses[0];
+    await db.batch([
+      { sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES ('category_wrong_fk', 'Wrong FK', 'wrong fk')" },
+      { sql: "UPDATE expenses SET category_id = 'category_wrong_fk' WHERE id = ?", params: [expense.id] },
+    ]);
+    await expect(applyImportPlan(db, plan)).rejects.toThrow("does not match the workbook projection");
+    await db.batch([{ sql: "UPDATE expenses SET category_id = ? WHERE id = ?", params: [expense.categoryId, expense.id] }]);
+
+    const mismatchedCategory: ImportDatabase = {
+      persistTo: db.persistTo,
+      async query<T extends Record<string, unknown> = Record<string, unknown>>(sql: string, params?: Array<string | number | null>): Promise<T[]> {
+        const rows = await db.query<T>(sql, params);
+        if (!sql.includes("FROM expenses e")) return rows;
+        return rows.map((row) => ({ ...row, category_id: "category_same_name_wrong_id" })) as T[];
+      },
+      batch: (statements) => db.batch(statements),
+    };
+
+    await expect(applyImportPlan(mismatchedCategory, plan)).rejects.toThrow("does not match the workbook projection");
+  });
+
+  it("rolls back a guarded provenance backfill when the row changes after validation", async () => {
+    const db = await databaseWithMigrations([initialSchema, indexes, referenceNormalization, plantationCohorts]);
+    const plan = await normalizeWorkbook(fixture, { allowUnapprovedSource: true });
+    const enriched = plan.expenses[0];
+    await db.batch([
+      { sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES (?, ?, ?)", params: [enriched.categoryId, enriched.categoryName, enriched.categoryName.toLocaleLowerCase("en-IN")] },
+      { sql: "INSERT INTO expense_categories (id, name, normalized_name) VALUES ('category_race', 'Race Category', 'race category')" },
+      {
+        sql: `INSERT INTO expenses (
+          id, expense_date, description, amount_paise, paid_by_person_id, category_id,
+          expense_class, paid_to, notes, crop_id, is_shared, source, source_sheet,
+          source_row, import_fingerprint
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, 'EXCEL', ?, ?, ?)`,
+        params: [enriched.id, enriched.expenseDate, enriched.description, enriched.amountPaise, enriched.paidByPersonId, enriched.categoryId, enriched.paidTo, enriched.notes, enriched.sourceSheet, enriched.sourceRow, enriched.importFingerprint],
+      },
+    ]);
+    await db.exec(importProvenance);
+    let raced = false;
+    const racingDatabase: ImportDatabase = {
+      persistTo: db.persistTo,
+      query: (sql, params) => db.query(sql, params),
+      async batch(statements) {
+        if (!raced) {
+          raced = true;
+          await db.batch([{ sql: "UPDATE expenses SET category_id = 'category_race' WHERE id = ?", params: [enriched.id] }]);
+        }
+        return db.batch(statements);
+      },
+    };
+
+    await expect(applyImportPlan(racingDatabase, plan)).rejects.toThrow("Local D1 batch failed");
+    expect(await db.query("SELECT category_id, enrichment_source_json FROM expenses WHERE id = ?", [enriched.id])).toEqual([
+      { category_id: "category_race", enrichment_source_json: null },
+    ]);
+    expect(await db.query("SELECT COUNT(*) count FROM plantation_inventory")).toEqual([{ count: 0 }]);
+  });
+
+  it("migrates concurrent fix-base expense identities without duplicate inserts", async () => {
+    const db = await database();
+    const plan = await normalizeWorkbook(fixture, { allowUnapprovedSource: true });
+    expect(plan.expenses.map((expense) => fixBaseExpenseIdentity(expense).fingerprint)).toEqual([
+      "9d2e45ad989d032d21ccf005f7af71298e38a4123da6f5d57c23506b38bd24d6",
+      "c9f4ea3c75baa45785b3a383cecf64c06796f63a347b7500f3149e3516d252d9",
+    ]);
+    await materializeFixBaseExpenses(db, plan);
+
+    const results = await Promise.all([applyImportPlan(db, plan), applyImportPlan(db, plan)]);
+    expect(results.map((result) => result.inserted.expenses)).toEqual([0, 0]);
+    expect(results.map((result) => result.migrated.expenseCanonicalIdentities).sort((left, right) => left - right)).toEqual([0, 2]);
+    expect(results.map((result) => result.duplicates).sort((left, right) => left - right)).toEqual([2, 10]);
+    expect(await db.query("SELECT id, source_row, import_fingerprint, enrichment_source_json FROM expenses ORDER BY source_row")).toEqual(
+      plan.expenses.map((expense) => ({
+        id: expense.id,
+        source_row: expense.sourceRow,
+        import_fingerprint: expense.importFingerprint,
+        enrichment_source_json: expense.enrichmentSource ? JSON.stringify(expense.enrichmentSource) : null,
+      })),
+    );
+    expect(await db.query("SELECT COUNT(*) count FROM expenses")).toEqual([{ count: 2 }]);
+    await expect(verifyImport(db, fixture, { allowUnapprovedSource: true })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("rejects a conflicting canonical and fix-base expense pair", async () => {
+    const db = await database();
+    const plan = await normalizeWorkbook(fixture, { allowUnapprovedSource: true });
+    const expense = plan.expenses[0];
+    await materializeFixBaseExpenses(db, { ...plan, expenses: [expense] });
+    const [{ id: categoryId }] = await db.query<{ id: string }>("SELECT id FROM expense_categories WHERE normalized_name = ?", [expense.categoryName.toLocaleLowerCase("en-IN")]);
+    await db.batch([{
+      sql: `INSERT INTO expenses (
+        id, expense_date, description, amount_paise, paid_by_person_id, category_id,
+        expense_class, paid_to, notes, crop_id, is_shared, source, source_sheet,
+        source_row, import_fingerprint, enrichment_source_json
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, 'EXCEL', ?, ?, ?, ?)`,
+      params: [expense.id, expense.expenseDate, expense.description, expense.amountPaise, expense.paidByPersonId, categoryId, expense.paidTo, expense.notes, expense.sourceSheet, expense.sourceRow, expense.importFingerprint, JSON.stringify(expense.enrichmentSource)],
+    }]);
+    const oneExpensePlan = { ...plan, expenses: [expense], plantation: [], harvests: [] };
+
+    await expect(applyImportPlan(db, oneExpensePlan)).rejects.toThrow("conflicting imported expense identities");
+    expect(await db.query("SELECT COUNT(*) count FROM expenses")).toEqual([{ count: 2 }]);
   });
 
   it("refuses provenance backfill when an existing fingerprint has mismatched business fields", async () => {

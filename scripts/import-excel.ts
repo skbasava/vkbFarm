@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +47,7 @@ export type ImportResult = {
   dryRun: boolean;
   inserted: { categories: number; crops: number; expenses: number; plantation: number; harvests: number };
   backfilled: { expenseEnrichmentProvenance: number };
+  migrated: { expenseCanonicalIdentities: number };
   duplicates: number;
   accepted: { expenses: number; plantation: number; harvests: number };
   skipped: number;
@@ -210,6 +212,7 @@ type ExistingExpense = {
   description: string;
   amount_paise: number;
   paid_by_person_id: string;
+  category_id: string | null;
   category_name: string;
   expense_class: string | null;
   paid_to: string | null;
@@ -224,12 +227,20 @@ type ExistingExpense = {
   deleted_at: string | null;
 };
 
-function expenseMatchesPlan(row: ExistingExpense, expense: ImportPlan["expenses"][number]): boolean {
-  return row.id === expense.id
+type ExpectedExpenseState = {
+  id: string;
+  categoryId: string;
+  fingerprint: string;
+  enrichmentSourceJson: string | null;
+};
+
+function expenseMatchesPlan(row: ExistingExpense, expense: ImportPlan["expenses"][number], expected: ExpectedExpenseState): boolean {
+  return row.id === expected.id
     && row.expense_date === expense.expenseDate
     && row.description === expense.description
     && row.amount_paise === expense.amountPaise
     && row.paid_by_person_id === expense.paidByPersonId
+    && row.category_id === expected.categoryId
     && row.category_name === expense.categoryName
     && row.expense_class === null
     && row.paid_to === expense.paidTo
@@ -239,19 +250,95 @@ function expenseMatchesPlan(row: ExistingExpense, expense: ImportPlan["expenses"
     && row.source === expense.source
     && row.source_sheet === expense.sourceSheet
     && row.source_row === expense.sourceRow
-    && row.import_fingerprint === expense.importFingerprint
+    && row.import_fingerprint === expected.fingerprint
     && row.deleted_at === null;
+}
+
+function expenseStatePredicate(expense: ImportPlan["expenses"][number], expected: ExpectedExpenseState): { sql: string; params: Array<string | number | null> } {
+  return {
+    sql: `id = ?
+      AND expense_date = ?
+      AND description = ?
+      AND amount_paise = ?
+      AND paid_by_person_id = ?
+      AND category_id = ?
+      AND EXISTS (
+        SELECT 1 FROM expense_categories expected_category
+        WHERE expected_category.id = expenses.category_id
+          AND expected_category.name = ?
+          AND expected_category.normalized_name = ?
+      )
+      AND expense_class IS NULL
+      AND paid_to IS ?
+      AND notes IS ?
+      AND crop_id IS NULL
+      AND is_shared = 1
+      AND source = ?
+      AND source_sheet = ?
+      AND source_row = ?
+      AND import_fingerprint = ?
+      AND enrichment_source_json IS ?
+      AND deleted_at IS NULL`,
+    params: [
+      expected.id,
+      expense.expenseDate,
+      expense.description,
+      expense.amountPaise,
+      expense.paidByPersonId,
+      expected.categoryId,
+      expense.categoryName,
+      expense.categoryName.toLocaleLowerCase("en-IN"),
+      expense.paidTo,
+      expense.notes,
+      expense.source,
+      expense.sourceSheet,
+      expense.sourceRow,
+      expected.fingerprint,
+      expected.enrichmentSourceJson,
+    ],
+  };
+}
+
+function expenseStateGuard(expense: ImportPlan["expenses"][number], expected: ExpectedExpenseState): SqlStatement {
+  const predicate = expenseStatePredicate(expense, expected);
+  return {
+    // SQLite evaluates CASE lazily. The minimum-integer abs() branch raises an
+    // overflow, which makes D1 roll back the batch if neither this run nor an
+    // identical concurrent run established the complete expected state.
+    sql: `SELECT CASE
+      WHEN EXISTS (SELECT 1 FROM expenses WHERE ${predicate.sql}) THEN 1
+      ELSE abs(-9223372036854775808)
+    END import_guard`,
+    params: predicate.params,
+  };
+}
+
+function fixBaseExpenseIdentity(expense: ImportPlan["expenses"][number]): { id: string; fingerprint: string } {
+  const identity = {
+    sheet: expense.sourceSheet,
+    row: expense.sourceRow,
+    date: expense.expenseDate,
+    description: expense.description,
+    amountPaise: expense.amountPaise,
+    payer: expense.paidByPersonId === "person_mahesh" ? "Mahesh" : "Satish",
+    categoryName: expense.categoryName,
+    paidTo: expense.paidTo,
+    notes: expense.notes,
+    enrichmentSource: expense.enrichmentSource,
+  };
+  const fingerprint = createHash("sha256").update(`expense\n${JSON.stringify(identity)}`).digest("hex");
+  return { id: `expense_import_${fingerprint.slice(0, 24)}`, fingerprint };
 }
 
 function sourceNotes(sources: ImportPlan["plantation"][number]["sources"]): string {
   return `Imported aggregate from ${sources.map((source) => `${source.sheet}!${source.column}${source.row}`).join(", ")}`;
 }
 
-export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan): Promise<Pick<ImportResult, "inserted" | "backfilled" | "duplicates">> {
+export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan): Promise<Pick<ImportResult, "inserted" | "backfilled" | "migrated" | "duplicates">> {
   const [expenseRows, plantationRows, harvestRows, categoryRows, cropRows] = await Promise.all([
     database.query<ExistingExpense>(`SELECT
       e.id, e.expense_date, e.description, e.amount_paise, e.paid_by_person_id,
-      c.name category_name, e.expense_class, e.paid_to, e.notes, e.crop_id,
+      e.category_id, c.name category_name, e.expense_class, e.paid_to, e.notes, e.crop_id,
       e.is_shared, e.source, e.source_sheet, e.source_row, e.import_fingerprint,
       e.enrichment_source_json, e.deleted_at
       FROM expenses e
@@ -268,9 +355,16 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
   const categoryIds = new Map(categoryRows.map((row) => [row.normalized_name, row.id]));
   const cropIds = new Map(cropRows.map((row) => [row.normalized_name, row.id]));
   const statements: SqlStatement[] = [];
-  const statementKinds: Array<keyof ImportResult["inserted"] | "expenseEnrichmentProvenance"> = [];
+  const statementKinds: Array<
+    keyof ImportResult["inserted"]
+    | "expenseEnrichmentProvenance"
+    | "expenseCanonicalIdentity"
+    | "expenseCanonicalIdentityAndProvenance"
+    | "guard"
+  > = [];
   const inserted = { categories: 0, crops: 0, expenses: 0, plantation: 0, harvests: 0 };
   const backfilled = { expenseEnrichmentProvenance: 0 };
+  const migrated = { expenseCanonicalIdentities: 0 };
 
   for (const category of plan.categories) {
     if (categoryIds.has(category.normalizedName)) continue;
@@ -297,28 +391,58 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
 
   const now = new Date().toISOString();
   for (const expense of plan.expenses) {
-    const existing = existingExpenses.get(expense.importFingerprint);
+    const categoryId = categoryIds.get(expense.categoryName.toLocaleLowerCase("en-IN"));
+    if (!categoryId) throw new Error("Import plan category dependency is missing");
+    const fixBaseIdentity = fixBaseExpenseIdentity(expense);
+    const canonicalExisting = existingExpenses.get(expense.importFingerprint);
+    const fixBaseExisting = existingExpenses.get(fixBaseIdentity.fingerprint);
+    if (canonicalExisting && fixBaseExisting && canonicalExisting.id !== fixBaseExisting.id) {
+      throw new Error(`Existing database has conflicting imported expense identities for source row ${expense.sourceRow}`);
+    }
+    const existing = canonicalExisting ?? fixBaseExisting;
     if (existing) {
-      if (!expenseMatchesPlan(existing, expense)) {
-        throw new Error(`Existing imported expense ${expense.importFingerprint} does not match the workbook projection`);
+      const existingIdentity = canonicalExisting
+        ? { id: expense.id, fingerprint: expense.importFingerprint }
+        : fixBaseIdentity;
+      const expected = {
+        id: existingIdentity.id,
+        categoryId,
+        fingerprint: existingIdentity.fingerprint,
+        enrichmentSourceJson: existing.enrichment_source_json,
+      };
+      if (!expenseMatchesPlan(existing, expense, expected)) {
+        throw new Error(`Existing imported expense ${existingIdentity.fingerprint} does not match the workbook projection`);
       }
       const enrichmentSource = expense.enrichmentSource ? JSON.stringify(expense.enrichmentSource) : null;
-      if (existing.enrichment_source_json !== enrichmentSource) {
-        if (existing.enrichment_source_json !== null || enrichmentSource === null) {
-          throw new Error(`Existing imported expense ${expense.importFingerprint} has conflicting enrichment provenance`);
-        }
+      const needsProvenance = existing.enrichment_source_json !== enrichmentSource;
+      if (needsProvenance && (existing.enrichment_source_json !== null || enrichmentSource === null)) {
+        throw new Error(`Existing imported expense ${existingIdentity.fingerprint} has conflicting enrichment provenance`);
+      }
+      if (fixBaseExisting && !canonicalExisting) {
+        const before = expenseStatePredicate(expense, expected);
         statements.push({
           sql: `UPDATE expenses
-            SET enrichment_source_json = ?, updated_at = ?
-            WHERE id = ? AND import_fingerprint = ? AND enrichment_source_json IS NULL`,
-          params: [enrichmentSource, now, existing.id, expense.importFingerprint],
+            SET id = ?, import_fingerprint = ?, enrichment_source_json = ?, updated_at = ?
+            WHERE ${before.sql}`,
+          params: [expense.id, expense.importFingerprint, enrichmentSource, now, ...before.params],
         });
+        statementKinds.push(needsProvenance ? "expenseCanonicalIdentityAndProvenance" : "expenseCanonicalIdentity");
+        statements.push(expenseStateGuard(expense, {
+          id: expense.id,
+          categoryId,
+          fingerprint: expense.importFingerprint,
+          enrichmentSourceJson: enrichmentSource,
+        }));
+        statementKinds.push("guard");
+      } else if (needsProvenance) {
+        const before = expenseStatePredicate(expense, { ...expected, enrichmentSourceJson: null });
+        statements.push({ sql: `UPDATE expenses SET enrichment_source_json = ?, updated_at = ? WHERE ${before.sql}`, params: [enrichmentSource, now, ...before.params] });
         statementKinds.push("expenseEnrichmentProvenance");
+        statements.push(expenseStateGuard(expense, { ...expected, enrichmentSourceJson: enrichmentSource }));
+        statementKinds.push("guard");
       }
       continue;
     }
-    const categoryId = categoryIds.get(expense.categoryName.toLocaleLowerCase("en-IN"));
-    if (!categoryId) throw new Error("Import plan category dependency is missing");
     statements.push({
       sql: `INSERT INTO expenses (
         id, expense_date, description, amount_paise, paid_by_person_id, category_id,
@@ -365,11 +489,15 @@ export async function applyImportPlan(database: ImportDatabase, plan: ImportPlan
   changes.forEach((count, index) => {
     const kind = statementKinds[index];
     if (kind === "expenseEnrichmentProvenance") backfilled.expenseEnrichmentProvenance += count;
-    else inserted[kind] += count;
+    else if (kind === "expenseCanonicalIdentity" || kind === "expenseCanonicalIdentityAndProvenance") {
+      migrated.expenseCanonicalIdentities += count;
+      if (kind === "expenseCanonicalIdentityAndProvenance") backfilled.expenseEnrichmentProvenance += count;
+    }
+    else if (kind !== "guard") inserted[kind] += count;
   });
   const duplicates = plan.duplicates + plan.expenses.length + plan.plantation.length + plan.harvests.length
     - inserted.expenses - inserted.plantation - inserted.harvests;
-  return { inserted, backfilled, duplicates };
+  return { inserted, backfilled, migrated, duplicates };
 }
 
 async function validateIssueReportPath(errorsPath: string, sourcePath: string, persistTo?: string): Promise<string> {
@@ -440,6 +568,7 @@ export async function importWorkbook(options: { workbookPath: string; dryRun: bo
       dryRun: true,
       inserted: { categories: 0, crops: 0, expenses: 0, plantation: 0, harvests: 0 },
       backfilled: { expenseEnrichmentProvenance: 0 },
+      migrated: { expenseCanonicalIdentities: 0 },
       duplicates: plan.duplicates,
       accepted,
       skipped: plan.skipped,

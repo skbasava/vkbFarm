@@ -86,6 +86,33 @@ verification command. No remote D1 path is accepted.
   verification hash and parse that same buffer, closing the pathname replacement
   window between checksum approval and workbook interpretation.
 
+## Review fix round 3
+
+- Existing-expense validation now carries the resolved `category_id` as well as
+  the joined display name. Coverage rejects a real wrong foreign key and also
+  injects a same-display-name/different-ID query result, since the current schema's
+  unique category name prevents materializing that risk directly.
+- Provenance repair predicates every validated business and policy field with
+  null-safe comparisons, including the category FK/name/normalized name. An
+  in-batch assertion accepts either this run's successful transition or an
+  already-completed identical concurrent transition; any other zero-change state
+  raises a SQLite error and rolls back the importer batch. A controlled mutation
+  between pre-read and batch proves provenance is not attached and dependent
+  inserts do not commit.
+- The importer recognizes the expense fingerprint and deterministic ID produced
+  by fix base `79ac2ec`, whose identity included `enrichmentSource` (including
+  `null`). After full-field and resolved-category validation, it atomically moves
+  enriched and unenriched rows to the canonical identity while retaining source
+  sheet/row and enrichment provenance. Actual transitions are reported separately
+  as `migrated.expenseCanonicalIdentities`; they are duplicates, not inserts.
+- Concurrent compatibility reruns yield one actual identity migration and one
+  guarded no-op. A database containing both canonical and fix-base identities for
+  the same source row fails closed rather than choosing or duplicating a row.
+- The four new integration regressions were observed RED on `794d4d9`: category-ID
+  mismatch and post-validation mutation both resolved instead of rejecting,
+  fix-base rows produced two duplicate inserts, and a canonical/fix-base conflict
+  was ignored. All four passed after their respective implementation slices.
+
 ## Source checksum and parser decision
 
 - The copied source and the supplied workbook both have SHA-256
@@ -155,6 +182,15 @@ backfills. Exact verification returned `ok: true`; projection digests matched fo
 394/40/3 rows. The rerun inserted nothing, backfilled nothing, and reported 437
 duplicates.
 
+Fix-round-3 disposable CLI persistence directory:
+`/tmp/vkb-task11-fix3-4Ft8FU/db` (local-only and removed after evidence capture).
+All five migrations applied. The approved dry run accepted 394 expenses, 40
+plantation rows, and 3 harvests with zero errors/inserts/backfills/migrations. The
+first import inserted 87 categories, 23 crops, 394 expenses, 40 plantation rows,
+and 3 harvests. Exact verification returned `ok: true` with matching 394/40/3
+projection digests. The rerun inserted, backfilled, and migrated zero rows and
+reported exactly 437 duplicates.
+
 ## Dependency and audit evidence
 
 - `xlsx` 0.18.5 was replaced with maintained SheetJS CE 0.20.3 from the official
@@ -175,9 +211,9 @@ duplicates.
 
 ## Final verification
 
-- Task-focused fix-round-2 Vitest: 2 files, 31 tests passed.
+- Task-focused fix-round-3 Vitest: 2 files, 35 tests passed.
 - Unit/frontend/integration Vitest with Worker files excluded: 24 files,
-  110 tests passed.
+  114 tests passed.
 - Dedicated Cloudflare Worker Vitest: 8 files, 64 tests passed.
 - `npm run typecheck`, `npm run lint`, and `npm run build`: exited 0.
 - `git diff --check`: no whitespace errors.

@@ -47,9 +47,13 @@ import against the same local directory skips every matching business fingerprin
 The JSON result reports provenance repairs separately under
 `backfilled.expenseEnrichmentProvenance`; these repairs update matching pre-0005
 expense rows after validating their complete imported business projection and do
-not count as new inserts. Detail-log enrichment requires a global one-ledger-row
-to-one-detail-row match. Payer whitespace trimming is explicitly recorded in the
-normalization ledger, and cached harvest revenue must equal exact weight × price.
+not count as new inserts. Databases written by the earlier Task 11 fix base are
+recognized by its historical expense fingerprint and safely migrated to the
+canonical identity; actual changes are reported under
+`migrated.expenseCanonicalIdentities`. Detail-log enrichment requires a global
+one-ledger-row to-one-detail-row match. Payer whitespace trimming is explicitly
+recorded in the normalization ledger, and cached harvest revenue must equal exact
+weight × price.
 `migration-errors.json` contains structured invalid-row evidence; the CLI prints
 only counts, the source filename, and its checksum.
 
