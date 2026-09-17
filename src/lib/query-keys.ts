@@ -11,6 +11,8 @@ export const queryKeys = {
   expenseCashflowReport: ["reports", "cashflow"] as const,
   settlements: ["settlements"] as const,
   plantation: ["plantation"] as const,
+  harvestsRoot: ["harvests"] as const,
   harvests: (filters: QueryFilters = {}) => ["harvests", filters] as const,
   reports: (filters: QueryFilters = {}) => ["reports", filters] as const,
+  reportsRoot: ["reports"] as const,
 };

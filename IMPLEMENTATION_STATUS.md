@@ -11,4 +11,5 @@
 - Harvest tracking and exact revenue: implemented
 - Conservative Excel normalization, local-only dry run/import, idempotency, and independent verification: complete
 - Secure R2 receipts, audited document APIs, and responsive document experience: complete
-- Settings administration and final PWA/production readiness: remaining
+- Responsive role-aware settings administration for people, categories, crops, farm areas, and application facts: complete
+- Final PWA/production readiness: remaining
