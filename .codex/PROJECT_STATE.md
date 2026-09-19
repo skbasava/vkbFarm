@@ -2,7 +2,7 @@
 
 ## Product
 
-VKB Farm Manager is a mobile-first application for a shared farm's spending, contributions, settlements, inventory, harvest revenue, receipts, and cash flow. All business modules, the conservative Excel migration, private documents, and administration settings are reviewed; the remaining plan task is final PWA/E2E/accessibility and operations readiness.
+VKB Farm Manager is a mobile-first application for a shared farm's spending, contributions, settlements, inventory, harvest revenue, receipts, and cash flow. All planned V1 business modules, conservative Excel migration, private documents, administration, PWA, accessibility, E2E, and operations work are implemented; only final review and account-owner release gates remain.
 
 ## Stack
 
@@ -26,11 +26,11 @@ One Worker serves the SPA and owns `/api/v1`. Routes delegate to middleware, ser
 
 ## Implemented
 
-Foundation, D1 schema/indexes, shared API/security contracts, people/category/expense workflows, responsive shell, settlements, financial reporting, plantation inventory, exact harvest tracking, conservative Excel migration, private receipt documents, and role-aware settings are committed through `c749aed`. Financial aggregates are range-checked, the workbook imports with exact provenance, receipts have compensated R2/D1 lifecycle handling, and reference administration is non-destructive and admin-only.
+The complete V1 implementation is committed through `f7c7b40`: foundation, D1, API/security, expenses, settlements, reports, plantation, harvest, exact workbook migration, private receipts, role-aware settings, asset-only PWA, accessibility, isolated production-identity E2E, and a production-safe operations guide. Financial aggregates are range-checked, workbook provenance is exact, receipts have compensated R2/D1 lifecycle handling, and production packaging excludes local authentication.
 
 ## In progress
 
-Task 14 PWA, accessibility, end-to-end verification, and operations documentation are next. See `.codex/CURRENT_TASK.md` for the exact first action.
+Task 14 implementation is complete; scoped re-review and the whole-branch final review are in progress. See `.codex/CURRENT_TASK.md`.
 
 ## Important constraints
 
@@ -42,14 +42,15 @@ Task 14 PWA, accessibility, end-to-end verification, and operations documentatio
 
 ## Known issues
 
-- Final PWA/browser/accessibility acceptance and operations documentation remain the last plan task.
+- Native 200% zoom and installed standalone-PWA window checks require an account-owner browser and remain explicit release gates.
+- Cloudflare D1/R2 creation, account-level default-deny Access, and deployment require owner authority and have not been performed.
 - The importer replaced the stale parser with maintained SheetJS CE 0.20.3. Six high development-only findings remain in the Cloudflare toolchain; production audit was clean in the last authoritative run.
 
 ## Current priorities
 
-1. Complete PWA, browser/accessibility, operations, and final acceptance work.
-2. Run whole-branch review and prepare integration options.
+1. Complete scoped Task 14 and whole-branch reviews.
+2. Present branch integration options without pushing, merging, or deploying.
 
 ## Last updated
 
-2026-09-17 — Task 13 settings passed independent review and controller verification; Task 14 final readiness is next.
+2026-09-19 — Task 14 implementation and safety fix passed local acceptance; final reviews and owner-controlled release gates remain.

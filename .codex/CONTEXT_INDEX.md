@@ -20,6 +20,8 @@
 - `src/features/harvest/` — reviewed harvest filters, exact revenue forms, responsive summaries/charts, legacy-date disclosure, and tests.
 - `src/features/documents/` — reviewed private receipt list/upload/preview/delete experience with expense handoff and role-aware states.
 - `src/features/settings/` — reviewed five-section administration workspace with admin-only mutations, inactive history, field-mapped validation, and read-only application facts.
+- `public/`, `src/pwa/` — asset-only PWA manifest/icons/service worker and registration readiness tests.
+- `tests/e2e/`, `playwright.config.ts`, `scripts/run-e2e.mjs`, `scripts/start-e2e.mjs` — isolated production-identity mobile/desktop browser acceptance with temporary local D1/R2.
 - `src/lib/api-client.ts`, `format.ts`, `identity.ts`, `query-keys.ts` — shared API, display, identity, and query contracts.
 
 ## Backend
@@ -53,5 +55,5 @@
 
 ## Active checkpoint
 
-- `.codex/CURRENT_TASK.md` — exact Task 14 final readiness state. Load before touching source.
+- `.codex/CURRENT_TASK.md` — exact final-review and branch-handoff state. Load before touching source.
 - `git status --short`, `git diff --stat`, `git diff`, and `git log -5 --oneline` — current source-of-truth evidence.

@@ -113,3 +113,13 @@ Implemented a lazy responsive Settings workspace for people, expense categories,
 Relevant commits: `9244de0`, `c749aed`.
 
 Important outcome: editors and viewers have a useful read-only view; ordinary edits cannot overwrite concurrent active status; only explicit deactivate/reactivate actions change status; historical references are never hard-deleted.
+
+---
+
+## 2026-09-19 — PWA, accessibility, E2E, and operations readiness
+
+Implemented the asset-only installable PWA, production-safe Cloudflare environment selection, isolated production-identity Playwright harness, responsive/accessibility hardening, exact operations runbook, and final workbook/browser acceptance coverage.
+
+Relevant commits: `1852cdd`, `f7c7b40`.
+
+Important outcome: all `/api` traffic remains network-only with no offline write queue; production packages exclude the local identity bypass; automated acceptance covers admin/editor/viewer workflows at mobile and desktop sizes; first deployment requires account-level default-deny Access before any routable hostname or admin-email mapping. Native 200% zoom and installed standalone-PWA checks remain owner-browser release gates.
