@@ -88,3 +88,17 @@ Reason: The D1 document record stays the authorization boundary, financial evide
 Consequences: Viewer-or-higher roles may list and stream receipts; editor-or-higher roles may upload and delete. JPEG, PNG, and PDF uploads must pass MIME, extension, magic-byte, file-size, and bounded multipart-envelope validation. The client uses XHR only to report real upload progress and retains a failed file for retry.
 
 Do not: Publish the bucket, accept client-selected object keys, authorize reads by raw key, discard a saved expense when its later receipt upload fails, or filter historical receipts solely because the linked expense was soft-deleted.
+
+## ADR-007 — Production selection and offline behavior are explicit
+
+Status: Accepted
+
+Context: The default local environment enables a development identity, while the installed PWA must remain honest when connectivity is unavailable.
+
+Decision: Production builds and every deploy path explicitly use `CLOUDFLARE_ENV=production`; remote migrations explicitly select the production environment. The service worker caches only successful same-origin assets and the navigation shell, handles `/api` first as network-only, and never queues or fabricates writes. Local E2E creates disposable D1/R2 persistence and exercises production Access-header identity mapping.
+
+Reason: An implicit environment can package a local authentication bypass, and cached or synthetic API responses can misrepresent authoritative finance state.
+
+Consequences: Deploy dry-run output is a release gate, offline mutations fail visibly while preserving input, and production acceptance never reuses developer/import state or remote resources.
+
+Do not: Deploy a default local build, add `DEV_AUTH_ENABLED` to production, cache `/api`, add background write synchronization in V1, or run browser acceptance against remote bindings.

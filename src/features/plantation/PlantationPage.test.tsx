@@ -10,7 +10,46 @@ function renderPage() {
 }
 
 describe("PlantationPage", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    window.history.replaceState({}, "", "/");
+    vi.restoreAllMocks();
+  });
+
+  it("opens the create-cohort dialog for the direct /plantation/new route", async () => {
+    window.history.replaceState({}, "", "/plantation/new");
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      const path = String(url);
+      if (path === "/api/v1/identity") return Promise.resolve(new Response(JSON.stringify({ data: { email: "editor@vkb.test", role: "editor" } })));
+      if (path === "/api/v1/plantation/summary") return Promise.resolve(new Response(JSON.stringify({ data: { areas: [], rows: [], areaTotals: {}, totalQuantity: 0, cohortCount: 0, cohorts: [] } })));
+      if (path.startsWith("/api/v1/plantation/crops")) return Promise.resolve(new Response(JSON.stringify({ data: [{ id: "banana", name: "Banana", active: true }] })));
+      if (path.startsWith("/api/v1/plantation/farm-areas")) return Promise.resolve(new Response(JSON.stringify({ data: [{ id: "area_mt", code: "MT", name: "MT", active: true }] })));
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("dialog", { name: "Record crop cohort" })).toBeVisible();
+  });
+
+  it("associates plantation validation messages with authoritative fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+      const path = String(url);
+      if (path === "/api/v1/identity") return Promise.resolve(new Response(JSON.stringify({ data: { email: "editor@vkb.test", role: "editor" } })));
+      if (path === "/api/v1/plantation/summary") return Promise.resolve(new Response(JSON.stringify({ data: { areas: [], rows: [], areaTotals: {}, totalQuantity: 0, cohortCount: 0, cohorts: [] } })));
+      if (path.startsWith("/api/v1/plantation/crops")) return Promise.resolve(new Response(JSON.stringify({ data: [{ id: "banana", name: "Banana", active: true }] })));
+      if (path.startsWith("/api/v1/plantation/farm-areas")) return Promise.resolve(new Response(JSON.stringify({ data: [{ id: "area_mt", code: "MT", name: "MT", active: true }] })));
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click((await screen.findAllByRole("button", { name: /record cohort/i }))[0]!);
+    await user.selectOptions(screen.getByLabelText("Crop"), "");
+    await user.click(screen.getByRole("button", { name: "Record cohort" }));
+
+    expect(screen.getByLabelText("Crop")).toHaveAttribute("aria-describedby", "plantation-crop-error");
+    expect(screen.getByLabelText("Crop")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Choose a crop.")).toBeVisible();
+  });
 
   it("renders a dynamic crop matrix and opens a role-permitted entry form", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((url, init) => {

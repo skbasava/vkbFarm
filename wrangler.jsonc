@@ -24,11 +24,33 @@
   ],
   "vars": {
     "ENVIRONMENT": "local",
-    "DEV_AUTH_ENABLED": "true",
     "DOCUMENT_MAX_BYTES": "10485760"
   },
   "env": {
+    "development": {
+      "vars": {
+        "ENVIRONMENT": "local",
+        "DEV_AUTH_ENABLED": "true",
+        "DOCUMENT_MAX_BYTES": "10485760"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vkb-farm-db",
+          "database_id": "db00ab6a-447e-4d06-9937-bf2fb4f3efbf",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "RECEIPTS",
+          "bucket_name": "vkb-farm-receipts"
+        }
+      ]
+    },
     "production": {
+      "workers_dev": true,
+      "preview_urls": false,
       "vars": {
         "ENVIRONMENT": "production",
         "DOCUMENT_MAX_BYTES": "10485760"

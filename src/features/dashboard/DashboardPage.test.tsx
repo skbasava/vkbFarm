@@ -49,7 +49,9 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Diesel")).toBeVisible();
     expect(await screen.findByText("Date unavailable")).toBeVisible();
     expect(screen.getByText("42 plants across 1 crop and 1 area")).toBeVisible();
-    expect(screen.getAllByRole("img", { name: /expense/i }).length).toBeLessThanOrEqual(4);
+    expect(screen.queryAllByRole("img", { name: /expense/i }).length).toBeLessThanOrEqual(4);
+    expect(screen.getByRole("list", { name: "Monthly expense values" })).toHaveTextContent("2026-08: ₹500");
+    expect(screen.getByRole("list", { name: "Expense category values" })).toHaveTextContent("Tools: ₹2,000");
     expect(fetchSpy).toHaveBeenCalledWith("/api/v1/dashboard", undefined);
   });
 

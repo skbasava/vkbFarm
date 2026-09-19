@@ -63,6 +63,12 @@ describe("SettlementPage", () => {
     renderPage();
     await screen.findByText("Mahesh owes ₹2,000");
 
+    await user.selectOptions(screen.getByLabelText("From"), "");
+    await user.selectOptions(screen.getByLabelText("To"), "");
+    await user.click(screen.getByRole("button", { name: "Record payment" }));
+    expect(screen.getByLabelText("From")).toHaveAttribute("aria-describedby", "settlement-from-error");
+    expect(screen.getByLabelText("To")).toHaveAttribute("aria-describedby", "settlement-to-error");
+
     const paymentDate = (screen.getByLabelText("Payment date") as HTMLInputElement).value;
     await user.selectOptions(screen.getByLabelText("From"), "person_mahesh");
     await user.selectOptions(screen.getByLabelText("To"), "person_satish");

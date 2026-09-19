@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">VKB Farm Manager</title>
+  <desc id="description">A white sprout and field rows on a sky blue square.</desc>
+  <rect width="512" height="512" fill="#057db8"/>
+  <path d="M256 103v214" fill="none" stroke="#fffefd" stroke-linecap="round" stroke-width="32"/>
+  <path d="M252 191c-59-2-106-45-110-104 58-2 107 41 110 104Zm8 51c60-1 107-45 111-104-59-1-108 42-111 104Z" fill="#fffefd"/>
+  <path d="M74 408c63-59 127-72 182-39 55-33 119-20 182 39M110 447c53-43 103-50 146-23 43-27 93-20 146 23" fill="none" stroke="#fffefd" stroke-linecap="round" stroke-width="27"/>
+</svg>

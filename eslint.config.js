@@ -8,12 +8,34 @@ export default tseslint.config(
     ignores: [
       "dist/",
       "node_modules/",
+      "playwright-report/",
+      "test-results/",
       ".wrangler/",
       "worker-configuration.d.ts",
     ],
   },
   js.configs.recommended,
   tseslint.configs.recommended,
+  {
+    files: ["scripts/**/*.{mjs,ts}", "playwright.config.ts", "tests/e2e/**/*.ts"],
+    languageOptions: {
+      globals: {
+        Buffer: "readonly",
+        process: "readonly",
+      },
+    },
+  },
+  {
+    files: ["public/sw.js"],
+    languageOptions: {
+      globals: {
+        URL: "readonly",
+        caches: "readonly",
+        fetch: "readonly",
+        self: "readonly",
+      },
+    },
+  },
   {
     files: ["src/**/*.{ts,tsx}"],
     plugins: {

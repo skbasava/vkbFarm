@@ -3,17 +3,21 @@
   "version": "1.0.0",
   "description": "Mobile-first farm finance and operations manager.",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "CLOUDFLARE_ENV=development vite dev",
     "build": "vite build",
+    "build:production": "CLOUDFLARE_ENV=production vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy:dry-run": "npm run build:production && wrangler deploy --env production --dry-run",
+    "deploy": "npm run build:production && wrangler deploy --env production",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:worker": "vitest --config vitest.worker.config.ts run",
-    "test:e2e": "playwright test",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:server": "node scripts/start-e2e.mjs",
+    "icons:generate": "tsx scripts/generate-icons.ts",
     "lint": "eslint . --max-warnings 0",
     "db:migrate:local": "wrangler d1 migrations apply vkb-farm-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply vkb-farm-db --remote",
+    "db:migrate:remote": "wrangler d1 migrations apply vkb-farm-db --env production --remote",
     "import:prepare": "tsx scripts/prepare-import-db.ts",
     "import:excel": "tsx scripts/import-excel.ts",
     "verify:import": "tsx scripts/verify-import.ts"
@@ -52,12 +56,13 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@cloudflare/vite-plugin": "^1.54.6",
     "@cloudflare/vitest-plugin": "^1.1.6",
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260908.1",
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -78,7 +83,7 @@
     "typescript-eslint": "^8.70.0",
     "vite": "^8.2.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.130.0",
+    "wrangler": "4.130.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }

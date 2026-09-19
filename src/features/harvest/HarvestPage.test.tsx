@@ -73,6 +73,7 @@ describe("HarvestPage", () => {
     expect(quantityValues).toHaveTextContent("Aug '26 · Banana: 11");
     expect(quantityValues).toHaveTextContent("Sept '26 · Mango: 1.25");
     expect([...document.querySelectorAll(".harvest-chart svg")].every((svg) => svg.closest('[aria-hidden="true"]'))).toBe(true);
+    expect([...document.querySelectorAll(".harvest-chart svg")].every((svg) => svg.getAttribute("tabindex") !== "0")).toBe(true);
 
     await user.selectOptions(await screen.findByLabelText("Filter crop"), "banana");
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining("cropId=banana"), undefined));
@@ -91,6 +92,19 @@ describe("HarvestPage", () => {
       expect(JSON.parse(String(createCall?.[1]?.body))).not.toHaveProperty("source");
     });
     await waitFor(() => expect(fetchSpy.mock.calls.filter(([url]) => String(url).startsWith("/api/v1/harvests/summary")).length).toBeGreaterThan(2));
+  });
+
+  it("associates a missing crop error with the harvest crop control", async () => {
+    standardFetch();
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: /^record harvest$/i }));
+    const dialog = screen.getByRole("dialog", { name: /record harvest/i });
+    await user.click(within(dialog).getByRole("button", { name: /^record harvest$/i }));
+
+    expect(within(dialog).getByLabelText("Crop")).toHaveAttribute("aria-describedby", "harvest-crop-error");
+    expect(within(dialog).getByText("Choose a crop")).toBeVisible();
   });
 
   it("shows a loading skeleton while harvest queries are pending", () => {

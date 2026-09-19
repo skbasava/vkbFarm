@@ -1,84 +1,148 @@
 # VKB Farm Manager
 
-VKB Farm Manager is a mobile-first application for tracking shared farm spending,
-contributions, settlements, plantation inventory, harvests, revenue, and cash flow.
-
-## Stack
-
-React and Vite provide the client application. A Hono API runs in a Cloudflare
-Worker, with D1 for relational data and R2 for receipt files.
+VKB Farm Manager is a private, mobile-first farm finance and operations application. One Cloudflare Worker serves the React SPA and Hono API; D1 stores expenses, settlements, plantation, harvest, settings, and audit records; private R2 stores receipt files.
 
 ## Prerequisites
 
-- Node.js 22.12 or newer
-- npm
-- A Cloudflare account is required only for remote deployment
+- Node.js 22.12 or newer and npm
+- Wrangler 4.130.0 (installed by this project)
+- Chromium for Playwright 1.63.0: `npx playwright install chromium`
+- For production only: a Cloudflare account with Workers, D1, R2, and Zero Trust Access
+- For R2 backup: an S3-compatible tool such as AWS CLI and an R2 API token
 
-## Run locally
+Install exact locked dependencies with `npm ci`.
+
+## Repository layout
+
+- `src/`: React client, feature UI, typed API calls, and unit tests
+- `worker/`: Hono routes, services, repositories, authentication, and errors
+- `migrations/`: D1 schema migrations and stable reference seeds
+- `scripts/`: conservative workbook import/verification and local E2E harnesses
+- `tests/worker/`: Worker integration tests using isolated local bindings
+- `tests/e2e/`: Chromium workflows using a fresh temporary D1/R2 store per run
+- `public/`: manifest, asset-only service worker, and deterministic PWA icons
+
+The PWA caches only successful same-origin application assets and the navigation shell. All `/api` traffic—including reads, writes, CSV, and document streams—is network-only. Offline writes fail visibly and keep form values; V1 has no background synchronization.
+
+## Local development
+
+Apply migrations to Wrangler's local D1 store, then start the local Worker/Vite application:
 
 ```bash
-npm install
+npm run db:migrate:local
 npm run dev
 ```
 
-The local D1 identifier in `wrangler.jsonc` is a non-secret placeholder that is
-valid for local development. Before remote deployment, create the D1 database and
-R2 bucket, then replace the `database_id` in both the root and `production`
-environment binding with the created D1 database ID.
+`npm run dev` explicitly selects the `development` Wrangler environment, where the local-only development identity is enabled. Production never inherits that bypass. R2 is emulated locally by Wrangler. To isolate a local database, append `-- --persist-to /absolute/path/to/state` to the migration command and start Vite with `VKB_E2E_PERSIST_TO=/absolute/path/to/state npm run dev`.
 
-## Import the legacy workbook locally
+## Legacy workbook: disposable local import only
 
-The approved migration source is `data/VKB-Farm-Expense-tracker.xlsx`. Its SHA-256
-checksum is `655b77c344356bd9b201e616cf8c2766ec63495414c6673e02271471d5e8e67a`.
-The import command validates this checksum regardless of the supplied filename.
-It never supports remote D1 and requires an explicit workbook path. A write
-also requires a dedicated local persistence directory.
+The approved source is `data/VKB-Farm-Expense-tracker.xlsx`, SHA-256 `655b77c344356bd9b201e616cf8c2766ec63495414c6673e02271471d5e8e67a`. Import tooling is intentionally local-only; never point it at remote D1.
+
+Use a new directory outside the repository:
 
 ```bash
+IMPORT_STATE=/tmp/vkb-farm-import
 npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --dry-run --errors /tmp/vkb-migration-errors.json
-npm run import:prepare -- --local-db /tmp/vkb-farm-import
-npm run db:migrate:local -- --persist-to /tmp/vkb-farm-import
-npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --local-db /tmp/vkb-farm-import --errors /tmp/vkb-migration-errors.json
-npm run verify:import -- data/VKB-Farm-Expense-tracker.xlsx --local-db /tmp/vkb-farm-import
+npm run import:prepare -- --local-db "$IMPORT_STATE"
+npm run db:migrate:local -- --persist-to "$IMPORT_STATE"
+npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --local-db "$IMPORT_STATE" --errors /tmp/vkb-migration-errors.json
+npm run verify:import -- data/VKB-Farm-Expense-tracker.xlsx --local-db "$IMPORT_STATE"
+npm run import:excel -- data/VKB-Farm-Expense-tracker.xlsx --local-db "$IMPORT_STATE" --errors /tmp/vkb-migration-errors-rerun.json
 ```
 
-Use a new dedicated persistence directory for a disposable import. Repeating the
-import against the same local directory skips every matching business fingerprint.
-The JSON result reports provenance repairs separately under
-`backfilled.expenseEnrichmentProvenance`; these repairs update matching pre-0005
-expense rows after validating their complete imported business projection and do
-not count as new inserts. Databases written by the earlier Task 11 fix base are
-recognized by its historical expense fingerprint and safely migrated to the
-canonical identity; actual changes are reported under
-`migrated.expenseCanonicalIdentities`. Detail-log enrichment requires a global
-one-ledger-row to-one-detail-row match. Payer whitespace trimming is explicitly
-recorded in the normalization ledger, and cached harvest revenue must equal exact
-weight × price.
-`migration-errors.json` contains structured invalid-row evidence; the CLI prints
-only counts, the source filename, and its checksum.
+The verifier must report 394 expenses, 297,619,700 paise of expenses, plantation quantity 2,740, and 1,008,500 paise of harvest revenue. The rerun must insert nothing and skip the matching fingerprints. `--allow-unapproved-source` is only a fixture/testing override and can never establish the approved baseline.
 
-Every source must match the approved checksum. `--allow-unapproved-source` is an
-explicit fixture/testing override for dry runs, imports, and verification; results
-then report `approvedSource: false` and never claim approved baselines. Report
-paths must be JSON outside the repository, source, and local persistence directory.
-The importer and verifier hash and parse the same in-memory source bytes so a
-pathname replacement cannot change the workbook after checksum validation.
+## Verification
 
-Later implementation slices add the complete production deployment instructions.
+```bash
+npm test
+npm run test:worker
+npm run typecheck
+npm run lint
+npm run build
+npm run build:production
+npm run deploy:dry-run
+npm run test:e2e
+```
 
-## Production and preview security
+`npm run test:e2e` builds the production environment, creates temporary D1/R2 persistence, applies migrations and the committed E2E seed, and uses real production identity headers for admin/editor/viewer contexts. It never reuses `.wrangler/state`, workbook-import state, or remote bindings. `deploy:dry-run` compiles with production bindings but does not upload.
 
-Cloudflare Access is mandatory for this application in production. Before deploying,
-create or update a Cloudflare Access application and policy that covers **every**
-production hostname and every preview hostname that serves VKB Farm Manager. This
-includes the initial `workers.dev` or custom production hostname and any branch or
-preview hostnames enabled for the Worker. Do not leave an alternate hostname or
-direct route outside the Access application.
+## One-time production resource setup
 
-The Worker treats `Cf-Access-Authenticated-User-Email` as an identity only on
-these Access-protected hostnames. It looks up the matching active person and role
-in D1. With `ENVIRONMENT=production`, a missing or unknown identity is rejected
-with HTTP 401; it never falls back to the local development user. The automated
-Worker identity test verifies this fail-closed behavior, but Cloudflare Access
-policy coverage is an account-level deployment requirement that Wrangler cannot
-create or validate from this repository.
+These are account-owner commands. Do not run them until the account, names, Access policy, and backup location are approved.
+
+```bash
+npx wrangler login
+npx wrangler d1 create vkb-farm-db
+npx wrangler r2 bucket create vkb-farm-receipts
+```
+
+Copy the returned D1 UUID into every `database_id` in `wrangler.jsonc` (root, `development`, and `production`). Keep the R2 bucket private and retain the configured name. Do not add an `assets.directory`; the Cloudflare Vite plugin generates the deploy asset directory.
+
+Choose exactly one database initialization path:
+
+1. **Empty database:** run `npm run db:migrate:remote`. This explicitly uses `--env production --remote` and creates the schema plus stable seed references.
+2. **Verified workbook database:** complete and verify the disposable local workflow above, export that complete local database, and load it into the newly created empty remote D1 database. Do not run remote migrations first and do not run the workbook importer against remote D1.
+
+```bash
+npx wrangler d1 export vkb-farm-db --local --persist-to "$IMPORT_STATE" --output /tmp/vkb-farm-verified.sql
+npx wrangler d1 execute vkb-farm-db --env production --remote --file /tmp/vkb-farm-verified.sql
+```
+
+After either path, populate real Access email addresses for the imported/seeded people before first login. Imported people currently have null emails. Use carefully reviewed statements such as:
+
+```bash
+npx wrangler d1 execute vkb-farm-db --env production --remote --command "UPDATE people SET email='owner@example.com', app_role='admin' WHERE id='person_satish'"
+```
+
+Use unique emails, keep at least one active admin, and verify the rows before deployment. Never put personal emails or Access credentials in Git.
+
+## Cloudflare Access and first deployment
+
+Before the first deployment, open the Worker in **Workers & Pages**, add Cloudflare Access at the Worker level, and create an allow policy for the approved users. Protect all Worker traffic so assets and `/api/*` share one boundary. With the checked-in configuration this covers the expected `vkb-farm-manager.<account-subdomain>.workers.dev` hostname; preview URLs are disabled. If an approved custom domain is added later, extend Access to that hostname before enabling the route. The Worker maps `Cf-Access-Authenticated-User-Email` to an active D1 person and fails closed with HTTP 401 for missing or unknown production identities.
+
+First verify the production package without uploading:
+
+```bash
+npm run deploy:dry-run
+```
+
+The binding summary must show `ENVIRONMENT ("production")` and must not show `DEV_AUTH_ENABLED`. When the owner has confirmed resources, email mappings, backups, and Access coverage, deploy with:
+
+```bash
+npm run deploy
+```
+
+The production config deliberately sets `workers_dev: true` and `preview_urls: false`. A custom domain is an alternative only after its real hostname is known: add the approved custom-domain route in Cloudflare, expand the Access application to cover it, verify protection, and then decide whether to disable `workers.dev`. No unknown domain is configured in this repository.
+
+## Backups and operational snapshots
+
+Export D1 before migrations, bulk initialization, or a release:
+
+```bash
+npx wrangler d1 export vkb-farm-db --env production --remote --output "vkb-d1-$(date +%F).sql"
+```
+
+R2 has no bulk-download command in Wrangler 4.130.0. Create a scoped R2 API token, keep credentials outside shell history, and use supported S3 tooling against the account endpoint:
+
+```bash
+AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
+  aws s3 sync s3://vkb-farm-receipts ./vkb-r2-backup \
+  --endpoint-url https://ACCOUNT_ID.r2.cloudflarestorage.com
+```
+
+Use the authenticated Reports page to download dated expenses, settlements, plantation, and harvest CSV snapshots. CSV is an operational snapshot, not a substitute for D1 plus R2 backup.
+
+## Troubleshooting
+
+- **401 in production:** confirm Access covers the exact hostname, the request reached the Worker through Access, and the normalized Access email belongs to an active person.
+- **403 on a write:** viewers are read-only; confirm the mapped D1 `app_role` is `editor` or `admin` for that operation.
+- **Local 401:** start with `npm run dev`, not bare `vite`, so the development environment and local-only identity are selected.
+- **Missing tables:** apply migrations to the same `--persist-to` directory used by the local server.
+- **Receipt upload failure:** confirm JPEG/PNG/PDF type and extension match, the file is at most 10 MiB, and the private R2 binding is present. A failed receipt never rolls back its saved expense.
+- **Workbook rejected:** confirm the approved file checksum and use an external error-report path; do not bypass approval for real data.
+- **Offline save remains unsent:** reconnect and submit again. No write queue exists by design.
+- **PWA update appears delayed:** close all installed-app tabs and reopen. The service worker intentionally does not force `skipWaiting()`.
+
+Deployment status: **Ready for authenticated Cloudflare resource creation**.

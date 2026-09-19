@@ -11,7 +11,7 @@ import { PlantationMatrix } from "./PlantationMatrix";
 import { usePlantationSummary, type PlantationCohort } from "./api";
 
 export function PlantationPage() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => window.location.pathname.endsWith("/new"));
   const [cohort, setCohort] = useState<PlantationCohort>();
   const summary = usePlantationSummary();
   const identity = useIdentity();

@@ -58,6 +58,15 @@ async function parseBody(response: Response): Promise<unknown> {
 
 /** Requests a VKB API endpoint and returns the shared envelope's data payload. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  if (isOffline()) {
+    throw new ApiError({
+      status: 0,
+      code: "OFFLINE",
+      message: "You appear to be offline",
+      offline: true,
+    });
+  }
+
   let response: Response;
   try {
     response = await fetch(path, init);

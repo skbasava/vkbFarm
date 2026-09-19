@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { CirclePlus, Menu, Sprout } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { canManageExpenses, useIdentity } from "../../lib/identity";
 import { Button } from "../ui/button";
 import { DesktopSidebar } from "./DesktopSidebar";
 import { MobileNavigation } from "./MobileNavigation";
@@ -22,8 +23,22 @@ function pageName(pathname: string) {
 
 export function AppShell({ children }: AppShellProps) {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [tabletNavigationOpen, setTabletNavigationOpen] = useState(false);
+  const quickActionTrigger = useRef<HTMLElement | null>(null);
   const { pathname } = useLocation();
+  const identity = useIdentity();
+  const canWrite = canManageExpenses(identity.data);
   const title = pageName(pathname);
+  const openQuickActions = (trigger: HTMLElement) => {
+    quickActionTrigger.current = trigger;
+    setQuickActionsOpen(true);
+  };
 
-  return <div className="app-shell"><DesktopSidebar /><div className="app-shell__body"><header className="topbar"><div className="topbar__title"><Menu aria-hidden="true" className="topbar__menu" size={20} /><div><p>VKB Farm <span>/</span> Operations</p><h1>{title}</h1></div></div><Button className="topbar__quick" onClick={() => setQuickActionsOpen(true)}><CirclePlus aria-hidden="true" size={18} /> Quick add</Button><button aria-label="Open quick actions" className="topbar__compact-add" onClick={() => setQuickActionsOpen(true)}><Sprout aria-hidden="true" size={18} /></button></header><main className="app-shell__content">{children}</main></div><MobileNavigation onQuickAdd={() => setQuickActionsOpen(true)} /><QuickActionSheet onOpenChange={setQuickActionsOpen} open={quickActionsOpen} /></div>;
+  return <div className="app-shell" data-sidebar-expanded={tabletNavigationOpen}>
+    <a className="skip-link" href="#main-content" onClick={() => document.getElementById("main-content")?.focus()}>Skip to main content</a>
+    <DesktopSidebar />
+    <div className="app-shell__body"><header className="topbar"><div className="topbar__title"><button aria-expanded={tabletNavigationOpen} aria-label="Toggle navigation" className="topbar__menu-button" onClick={() => setTabletNavigationOpen((open) => !open)} type="button"><Menu aria-hidden="true" size={20} /></button><div><p>VKB Farm <span>/</span> Operations</p><h1>{title}</h1></div></div>{canWrite ? <><Button className="topbar__quick" onClick={(event) => openQuickActions(event.currentTarget)}><CirclePlus aria-hidden="true" size={18} /> Quick add</Button><button aria-label="Open quick actions" className="topbar__compact-add" onClick={(event) => openQuickActions(event.currentTarget)}><Sprout aria-hidden="true" size={18} /></button></> : null}</header><div className="connectivity-status"><span aria-hidden="true" className="status-dot" /> Server-backed records · writes require network</div><main className="app-shell__content" id="main-content" tabIndex={-1}>{children}</main></div>
+    <MobileNavigation canQuickAdd={canWrite} onQuickAdd={openQuickActions} />
+    <QuickActionSheet canWrite={canWrite} onOpenChange={setQuickActionsOpen} open={quickActionsOpen} returnFocus={() => quickActionTrigger.current?.focus()} />
+  </div>;
 }

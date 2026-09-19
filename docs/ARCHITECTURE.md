@@ -2,7 +2,7 @@
 
 ## System overview
 
-VKB Farm Manager is a mobile-first shared-farm ledger and operations application. It records expenses and later slices will cover settlements, reporting, plantation inventory, harvest revenue, document receipts, and a traceable Excel migration.
+VKB Farm Manager is a mobile-first shared-farm ledger and operations application. V1 covers expenses, settlements, reporting, plantation inventory, harvest revenue, private receipt documents, reference settings, a traceable Excel migration, and an asset-only PWA shell.
 
 ```mermaid
 flowchart LR
@@ -28,4 +28,6 @@ Cloudflare Access must protect every production and preview hostname. The Worker
 
 ## Deployment and cross-cutting concerns
 
-Cloudflare Vite serves static assets and the Worker handles `/api/*`; SPA fallback supports route refreshes. D1 and R2 bindings are declared in `wrangler.jsonc`; production IDs and Access coverage are account configuration, not repository secrets. Known validation, authentication, authorization, not-found, and conflict cases use the shared error envelope. Worker observability is enabled in Wrangler. Receipt lifecycle and spreadsheet import remain planned work; their security and traceability rules are in the approved design.
+Cloudflare Vite serves static assets and the Worker handles `/api/*`; SPA fallback supports route refreshes. D1 and R2 bindings are declared in `wrangler.jsonc`; production IDs and Access coverage are account configuration, not repository secrets. Known validation, authentication, authorization, not-found, conflict, and storage cases use the shared error envelope. Worker observability is enabled in Wrangler.
+
+The service worker caches only versioned same-origin assets and a navigation shell. It handles `/api` first and always delegates API reads, writes, CSV, and document streams to the network. Production build/deploy scripts explicitly select the `production` Wrangler environment; local development explicitly selects `development`. Browser acceptance uses a separate disposable local D1/R2 store with production identity behavior.

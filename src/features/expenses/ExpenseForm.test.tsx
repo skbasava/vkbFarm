@@ -53,6 +53,8 @@ describe("ExpenseForm", () => {
     expect(await screen.findByText("Amount is required")).toBeVisible();
     expect(screen.getByText("Category is required")).toBeVisible();
     expect(screen.getByText("Paid by is required")).toBeVisible();
+    expect(screen.getByRole("group", { name: "Paid by" })).toHaveAttribute("aria-describedby", "expense-payer-error");
+    expect(screen.getByRole("group", { name: "Paid by" })).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("Description is required")).toBeVisible();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
 
