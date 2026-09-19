@@ -21,8 +21,11 @@ async function findAccessIdentity(c: Context<AppEnv>): Promise<Identity | undefi
     .bind(email)
     .first<PersonIdentityRow>();
 
-  if (!person) return undefined;
-  return { email: person.email, role: person.app_role };
+  if (person) {
+    return { email: person.email, role: person.app_role };
+  }
+
+  return { email, role: "viewer" };
 }
 
 export async function resolveIdentity(c: Context<AppEnv>): Promise<Identity | undefined> {
