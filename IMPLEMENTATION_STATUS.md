@@ -12,6 +12,8 @@
 - Conservative Excel normalization, local-only dry run/import, idempotency, and independent verification: complete
 - Secure R2 receipts, audited document APIs, and responsive document experience: complete
 - Responsive role-aware settings administration for people, categories, crops, farm areas, and application facts: complete
-- Installable asset-only PWA, accessibility and responsive acceptance, isolated production-identity E2E, and production-safe build/deploy runbook: complete
+- Installable asset-only PWA implementation, automated accessibility/responsive acceptance, isolated production-identity E2E, and production-safe build/deploy runbook: complete
+- Code and automated PWA/accessibility acceptance: complete
+- Owner-browser release gates: pending — native 200% browser zoom and installed standalone PWA window
 
 Deployment Status: Ready for authenticated Cloudflare resource creation

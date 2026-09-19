@@ -90,17 +90,21 @@ npx wrangler d1 export vkb-farm-db --local --persist-to "$IMPORT_STATE" --output
 npx wrangler d1 execute vkb-farm-db --env production --remote --file /tmp/vkb-farm-verified.sql
 ```
 
-After either path, populate real Access email addresses for the imported/seeded people before first login. Imported people currently have null emails. Use carefully reviewed statements such as:
+## Cloudflare Access and first deployment
+
+The first deployment must use account-level Access because a Worker-level policy cannot be attached before the named Worker exists. Complete this sequence without deploying the application or enabling any custom route:
+
+1. Enable Zero Trust for the account if it is not already enabled.
+2. In the **Workers & Pages overview**, find **Protect all Workers**, select **Enable Access**, choose **All traffic**, and attach a default-deny policy that allows only the approved identities. Apply the policy. Do not add a Worker, hostname, or path bypass.
+3. Verify in the dashboard that account-level protection is enabled for **All traffic**, covers existing and future Workers, and has no public/bypass exception. This must be true before mapping a production admin email or creating the first routable deployment. See Cloudflare's [Protect all Workers instructions](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#protect-all-workers).
+
+Only after that protection is enabled and verified, populate real Access email addresses for the imported/seeded people. Imported people currently have null emails. Use a carefully reviewed statement such as:
 
 ```bash
 npx wrangler d1 execute vkb-farm-db --env production --remote --command "UPDATE people SET email='owner@example.com', app_role='admin' WHERE id='person_satish'"
 ```
 
-Use unique emails, keep at least one active admin, and verify the rows before deployment. Never put personal emails or Access credentials in Git.
-
-## Cloudflare Access and first deployment
-
-Before the first deployment, open the Worker in **Workers & Pages**, add Cloudflare Access at the Worker level, and create an allow policy for the approved users. Protect all Worker traffic so assets and `/api/*` share one boundary. With the checked-in configuration this covers the expected `vkb-farm-manager.<account-subdomain>.workers.dev` hostname; preview URLs are disabled. If an approved custom domain is added later, extend Access to that hostname before enabling the route. The Worker maps `Cf-Access-Authenticated-User-Email` to an active D1 person and fails closed with HTTP 401 for missing or unknown production identities.
+Use unique emails, keep at least one active admin, verify the rows, and never put personal emails or Access credentials in Git. The Worker maps `Cf-Access-Authenticated-User-Email` to an active D1 person and returns HTTP 401 for a missing or unknown mapped identity, but this application-level lookup is not a substitute for the Access gate.
 
 First verify the production package without uploading:
 
@@ -108,13 +112,29 @@ First verify the production package without uploading:
 npm run deploy:dry-run
 ```
 
-The binding summary must show `ENVIRONMENT ("production")` and must not show `DEV_AUTH_ENABLED`. When the owner has confirmed resources, email mappings, backups, and Access coverage, deploy with:
+The binding summary must show `ENVIRONMENT ("production")` and must not show `DEV_AUTH_ENABLED`. When the owner has confirmed resources, protected account-level Access, email mappings, and backups, deploy with:
 
 ```bash
 npm run deploy
 ```
 
-The production config deliberately sets `workers_dev: true` and `preview_urls: false`. A custom domain is an alternative only after its real hostname is known: add the approved custom-domain route in Cloudflare, expand the Access application to cover it, verify protection, and then decide whether to disable `workers.dev`. No unknown domain is configured in this repository.
+The production config deliberately sets `workers_dev: true` and `preview_urls: false`. Immediately after deployment, verify the exact `vkb-farm-manager.<account-subdomain>.workers.dev` hostname before using the application:
+
+- An unauthenticated request to both `/` and `/api/v1/identity` must be intercepted by Access with a login or deny response, not application HTML or JSON.
+- A request without an Access session but with a forged `Cf-Access-Authenticated-User-Email` header must also be intercepted by Access; it must never reach the application as an authenticated identity.
+- After an approved administrator completes Access login, `/api/v1/identity` must return that administrator's mapped email and `admin` role.
+- Recheck the Worker Access view for **All traffic** and confirm no Worker-level, hostname, or path rule overrides the account default with a bypass.
+
+If any check fails, disable the routable hostname or remove the deployment until protection is corrected. A custom domain may be enabled only after its real hostname is known, the account-level gate is still effective, any more-specific hostname rule is confirmed non-bypassing, and the same unauthenticated/forged-header checks pass. No unknown domain is configured in this repository.
+
+## Owner-browser release gates
+
+Code and automated PWA/accessibility acceptance are complete, but these two owner-browser checks remain pending and are required before production use:
+
+1. Inspect every primary route in a supported desktop browser at native 200% browser zoom. Confirm that controls, focus indicators, dialogs, navigation, validation, and content remain available without lost functionality or horizontal page overflow.
+2. Install the PWA through the target browser/operating system, launch the installed standalone PWA window, and verify `/dashboard` startup, Access login, navigation, online API behavior, cached-shell offline navigation, and update/reopen behavior.
+
+The in-app verification harness could exercise equivalent responsive reflow, manifest/install metadata, service-worker control, and offline shell behavior, but it could not invoke native browser zoom or an OS installed-app window. Do not mark these owner-browser gates complete from automated evidence alone.
 
 ## Backups and operational snapshots
 
@@ -145,4 +165,4 @@ Use the authenticated Reports page to download dated expenses, settlements, plan
 - **Offline save remains unsent:** reconnect and submit again. No write queue exists by design.
 - **PWA update appears delayed:** close all installed-app tabs and reopen. The service worker intentionally does not force `skipWaiting()`.
 
-Deployment status: **Ready for authenticated Cloudflare resource creation**.
+Deployment status: **Ready for authenticated Cloudflare resource creation**. Owner-browser release gates remain pending.

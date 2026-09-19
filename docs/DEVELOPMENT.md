@@ -5,7 +5,7 @@
 Use Node.js 22.12+ and npm.
 
 ```bash
-npm install
+npm ci
 npm run dev
 npm run test
 npm run test:worker
@@ -20,9 +20,9 @@ Focused frontend tests use `npm run test -- src/features/expenses`; Worker integ
 
 ## Local data and deployment
 
-Apply local D1 migrations with `npm run db:migrate:local`. `npm run dev` selects the local-only `development` Wrangler environment. The D1 IDs in `wrangler.jsonc` are non-secret placeholders; replace every root, development, and production binding with the account-created D1 ID before remote deployment. `npm run deploy:dry-run` is the required non-uploading production gate; `npm run deploy` is reserved for an authorized account owner.
+Apply local D1 migrations with `npm run db:migrate:local`. `npm run dev` selects the local-only `development` Wrangler environment. The D1 IDs in `wrangler.jsonc` are non-secret placeholders; replace every root, development, and production binding with the account-created D1 ID before remote deployment. `npm run deploy:dry-run` is the required non-uploading production gate.
 
-Production and every preview hostname must be protected by Cloudflare Access before deployment. See `README.md` for the required hostname coverage and account setup.
+Before mapping a production admin email or creating the first routable deployment, enable account-level **Protect all Workers** in the Workers & Pages overview, select **All traffic**, attach a default-deny allow policy, and verify there is no bypass. Only after this protection is verified may an authorized account owner run `npm run deploy`. Immediately after deployment, verify unauthenticated and forged-header requests are stopped by Access before the application, then complete the README's native-zoom and installed-window owner-browser gates before production use. See `README.md` for the exact sequence; never rely on selecting a Worker that does not exist yet.
 
 ## Conventions
 
